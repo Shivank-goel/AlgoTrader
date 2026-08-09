@@ -1,0 +1,36 @@
+---
+description: Performance optimization prompt template
+alwaysApply: false
+---
+
+# Optimize Prompt
+
+Use when optimizing Crypto-trader performance. Measure before changing.
+
+## Prompt
+
+Optimize the selected code. Requirements:
+
+1. **Measure first** — `time.perf_counter()` or `cProfile` before and after
+2. **Target the bottleneck** — don't optimize cold paths
+3. **Preserve correctness** — trading logic and risk checks unchanged
+
+## Hot Paths
+
+| Area | Target | Notes |
+|------|--------|-------|
+| Engine loop | ~30s per symbol cycle | Main bottleneck |
+| Candle fetch | Parallelize multi-timeframe | REST calls per symbol |
+| Indicators | Cache in `IndicatorEngine` | Avoid recomputing on same candles |
+| Universe scan | Every 6h | Expensive; don't run in tight loop |
+
+## Acceptable Tradeoffs
+
+- `ponytail:` comment for deliberate simplifications (e.g. O(n²) scan with upgrade path)
+- Sync SQLite for journal — low throughput, not a hot path
+
+## Avoid
+
+- Micro-optimizations without profiling data
+- Caching that breaks on regime/symbol switch
+- Skipping risk checks for speed

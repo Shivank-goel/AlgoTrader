@@ -1,0 +1,61 @@
+---
+description: Testing guidelines for tests/
+globs: tests/**/*.py
+alwaysApply: false
+---
+
+# Testing Guidelines
+
+## Framework
+
+- pytest + pytest-asyncio
+- Run: `python -m pytest tests/ -v`
+
+## Mocking
+
+Mock exchange at I/O boundary — never hit real Delta API in tests.
+
+```python
+from unittest.mock import AsyncMock, patch
+
+@pytest.fixture
+def mock_exchange():
+    with patch("src.execution.exchange.DeltaExchangeClient") as m:
+        m.return_value.get_positions = AsyncMock(return_value=[])
+        yield m
+```
+
+## Fixtures
+
+- Market states: candle DataFrames, regime enums
+- Reuse patterns from existing tests (`test_strategies.py`, `test_risk.py`)
+
+## Test Naming
+
+`test_<module>_<scenario>` — e.g. `test_circuit_breaker_halts_on_daily_loss`
+
+## Coverage Expectations
+
+| Area | Test File |
+|------|-----------|
+| Strategies + selector | `test_strategies.py` |
+| Risk manager | `test_risk.py` |
+| Circuit breakers | `test_circuit_breakers.py`, `test_circuit_breaker_resume.py` |
+| Reconciliation | `test_reconciliation.py` |
+| Execution idempotency | `test_execution_idempotency.py` |
+| Regime detection | `test_regime.py` |
+| Indicators | `test_indicators.py` |
+
+## New Strategy Checklist
+
+1. Add test cases in `tests/test_strategies.py`
+2. Test `analyze()` with fixture market states
+3. Test `get_preferred_regimes()` returns expected regimes
+4. Mock exchange if strategy triggers order flow
+
+## Edge Cases to Test
+
+- Empty candles, zero volume
+- Circuit breaker active (trading halted)
+- Position reconciliation mismatch
+- Duplicate `client_order_id` (idempotency)

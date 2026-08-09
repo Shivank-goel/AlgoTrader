@@ -1,0 +1,57 @@
+---
+description: Python coding conventions for src/
+globs: src/**/*.py
+alwaysApply: false
+---
+
+# Coding Conventions
+
+## Module Header
+
+```python
+from __future__ import annotations
+
+import logging
+
+logger = logging.getLogger(__name__)
+```
+
+## Domain Models
+
+- Pydantic `BaseModel` for `Candle`, `Signal`, `Order`, `Position`, etc. (`src/core/models.py`)
+- `Enum` for `Direction`, `Regime`, `OrderStatus`, etc.
+
+## Strategies
+
+Extend `BaseStrategy` ABC:
+
+```python
+class MyStrategy(BaseStrategy):
+  def analyze(self, state: MarketState) -> Signal | None: ...
+  def get_preferred_regimes(self) -> list[Regime]: ...
+```
+
+Register in `src/strategies/selector.py`.
+
+## Configuration
+
+- YAML for all tunable params (`config/*.yaml`)
+- `.env` for secrets only — load via `python-dotenv`
+- No magic numbers in strategy/risk code; read from config
+
+## Exchange Integration
+
+- Use `DeltaExchangeClient` (`src/execution/exchange.py`) — **not** ccxt
+- HMAC signing, rate-limit aware
+- `client_order_id` for idempotent order placement
+
+## Async
+
+- Engine and exchange calls are async (`asyncio`, `aiohttp`)
+- SQLite journal is sync (single-writer, low throughput — see ADR-002)
+
+## Naming
+
+- `snake_case` for functions, variables, modules
+- `PascalCase` for classes
+- Config keys match YAML structure

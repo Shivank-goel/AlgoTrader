@@ -1,0 +1,45 @@
+exchange:
+  name: delta
+  base_url_prod: https://api.india.delta.exchange
+  base_url_testnet: https://cdn-ind.testnet.deltaex.org
+  testnet: true
+
+trading:
+  mode: live  # paper = simulated only | live = real orders (demo or prod per engine mode)
+  pairs: []   # populated by universe scanner on start
+  primary_timeframe: 15m
+  candle_interval_seconds: 900
+
+engine:
+  loop_interval_seconds: 30       # pause between full scan cycles
+  scan_interval_seconds: 30         # alias — how often all symbols are re-scanned
+  heartbeat_interval_seconds: 30
+  max_concurrent_symbols: 10
+  max_loop_timeout_seconds: 600     # per-iteration timeout (watchdog)
+  watchdog_interval_seconds: 120    # how often watchdog checks for stalls
+  max_sync_failures: 5              # consecutive sync failures before halt
+
+universe:
+  scan_top_n: 50                  # top-N most liquid perpetuals to consider
+  top_active: 10                  # top-K to actually trade
+  quote_currencies: [USD, USDT]
+  min_turnover_usd: 0              # 0 = accept all perpetuals when ticker data sparse
+  excluded_underlyings: []
+  history_timeframe: 15m
+  history_bars: 3000              # bars of history for backtest (~31 days on 15m)
+  rescan_interval_hours: 48       # full rescan cadence (~2 days)
+  max_concurrent_backtests: 4
+
+logging:
+  level: INFO
+  file: logs/trader.log
+  max_bytes: 10485760
+  backup_count: 5
+
+dashboard:
+  host: 127.0.0.1
+  port: 8080
+
+notifications:
+  telegram_enabled: true
+  daily_summary_hour: 20

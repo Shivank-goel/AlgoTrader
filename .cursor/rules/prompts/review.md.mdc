@@ -1,0 +1,29 @@
+---
+description: Code review prompt template
+alwaysApply: false
+---
+
+# Code Review Prompt
+
+Use this when requesting a review of changes in Crypto-trader.
+
+## Prompt
+
+Review the following code changes for this crypto trading system. Focus on:
+
+1. **Trading logic correctness** — signals, position sizing, SL/TP, regime handling
+2. **Risk boundary enforcement** — circuit breakers, max drawdown, daily loss limits
+3. **Idempotency** — `client_order_id` usage, lookup-before-retry on orders
+4. **Error handling** — no swallowed exceptions; log with context
+5. **Config** — no hardcoded values that belong in `config/*.yaml`
+6. **Type hints** — public APIs typed
+7. **Exchange integration** — uses `DeltaExchangeClient`, not ccxt
+
+Flag any change that could affect live trading without paper/testnet validation.
+
+## Checklist
+
+- [ ] Root cause fixed in shared code, not per-caller patches
+- [ ] Smallest diff that solves the problem (ponytail)
+- [ ] Tests cover non-trivial logic
+- [ ] Secrets not committed

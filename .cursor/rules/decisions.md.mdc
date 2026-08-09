@@ -1,0 +1,54 @@
+---
+description: Architectural decisions (ADRs)
+alwaysApply: false
+---
+
+# Architectural Decisions
+
+## ADR-001: Custom Delta Client Over ccxt
+
+**Decision:** Use custom `DeltaExchangeClient` in `src/execution/exchange.py`, not ccxt.
+
+**Rationale:** Full control over HMAC signing, rate limits, bracket orders, and `client_order_id` idempotency. ccxt is in `requirements.txt` but unused.
+
+**Consequences:** Maintain exchange client ourselves; no generic exchange abstraction.
+
+---
+
+## ADR-002: Sync SQLite Over Async
+
+**Decision:** Trade journal uses sync SQLAlchemy + SQLite.
+
+**Rationale:** Single-writer, low throughput. Simpler than aiosqlite; no async DB complexity.
+
+**Consequences:** Journal writes block briefly; acceptable for trade logging.
+
+---
+
+## ADR-003: YAML Config Over Database Settings
+
+**Decision:** All tunable params in `config/*.yaml`.
+
+**Rationale:** Version-controllable, diffable, no migration overhead.
+
+**Consequences:** Config changes require restart; no runtime config UI.
+
+---
+
+## ADR-004: JSON State Files for Positions and Circuit Breakers
+
+**Decision:** `data/position_state.json` and circuit breaker state as JSON files.
+
+**Rationale:** Fast restart, human-readable, easy crash recovery.
+
+**Consequences:** `StartupReconciler` must sync with exchange on boot.
+
+---
+
+## ADR-005: Meta-Strategy Selector Over Fixed Assignment
+
+**Decision:** `StrategySelector` ranks strategies by regime fit + rolling performance.
+
+**Rationale:** Adapts to changing market conditions; universe scan can assign per-symbol strategies.
+
+**Consequences:** More complex than single-strategy; requires performance scoring in `src/learning/`.

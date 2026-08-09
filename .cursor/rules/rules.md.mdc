@@ -1,0 +1,56 @@
+---
+description: AI instructions and coding standards for Crypto-trader
+alwaysApply: true
+---
+
+# Coding Standards
+
+Follow [ponytail.mdc](ponytail.mdc): YAGNI, smallest working diff, fix root causes in shared code.
+
+## Language & Style
+
+- Python 3.10+
+- `from __future__ import annotations` in every module
+- Type hints on all public functions and methods
+- Pydantic v2 `BaseModel` for domain objects; `Enum` for domain values
+- Async-first for I/O (exchange, WebSocket, engine loop)
+
+## Imports
+
+Order: stdlib → third-party → local. Alphabetical within each group.
+
+```python
+from __future__ import annotations
+
+import asyncio
+import logging
+
+import pandas as pd
+from pydantic import BaseModel
+
+from src.core.models import Signal
+```
+
+## Error Handling
+
+- Module-level logger: `logger = logging.getLogger(__name__)`
+- Log errors with context (symbol, order ID, strategy name)
+- Never swallow exceptions silently — log and re-raise or propagate
+- At trust boundaries (exchange API, config load): validate and fail fast
+
+## Configuration
+
+- Tunable params → `config/*.yaml`
+- Secrets only → `.env` (never commit)
+- No hardcoded API keys, URLs, or risk limits in source
+
+## What Not To Do
+
+- No unrequested abstractions or new dependencies
+- No `ccxt` — use `DeltaExchangeClient` in `src/execution/exchange.py`
+- No boilerplate nobody asked for
+- Deletion over addition
+
+## Non-Trivial Changes
+
+Leave one runnable check: assert-based self-check or a small test. Trivial one-liners need no test.

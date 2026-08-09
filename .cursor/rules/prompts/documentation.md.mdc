@@ -1,0 +1,32 @@
+---
+description: Documentation prompt template
+alwaysApply: false
+---
+
+# Documentation Prompt
+
+Use when adding or improving documentation in Crypto-trader.
+
+## Prompt
+
+Document the selected code. Follow project conventions:
+
+1. **Docstring style** — Google format; one-liner for simple functions
+2. **Document why, not what** — strategy logic rationale, risk param reasoning
+3. **API quirks** — Delta Exchange signing, rate limits, bracket order behavior
+4. **Config** — which YAML keys control this behavior
+
+## What to Document
+
+| Type | Focus |
+|------|-------|
+| Strategy | Entry/exit logic, preferred regimes, param meaning |
+| Risk | Sizing formula, circuit breaker triggers |
+| Exchange | Endpoint, auth, idempotency, error codes |
+| Engine | Loop timing, event flow, reconciliation |
+
+## Avoid
+
+- Restating obvious code
+- Generic templates — use real paths and config keys
+- Documentation files nobody asked for (ponytail)

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adaptive Crypto Trader</title>
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=7">
+</head>
+<body>
+    <header class="control-bar">
+        <div class="control-left">
+            <h1 class="logo">Adaptive Crypto Trader</h1>
+            <div class="pulse-wrap">
+                <span class="pulse-dot" id="pulse-dot"></span>
+                <span class="state-badge" id="state-badge">IDLE</span>
+            </div>
+        </div>
+        <div class="control-center">
+            <div class="mode-tabs" role="tablist" aria-label="Trading mode">
+                <button type="button" class="mode-tab active" data-mode="demo" role="tab" aria-selected="true">
+                    <span class="mode-dot demo"></span> Demo
+                </button>
+                <button type="button" class="mode-tab" data-mode="live" role="tab" aria-selected="false">
+                    <span class="mode-dot live"></span> Live
+                </button>
+            </div>
+        </div>
+        <div class="control-right">
+            <button type="button" class="btn btn-secondary" id="btn-rescan" title="Rescan universe now">Rescan</button>
+            <button type="button" class="btn btn-start" id="btn-engine">Start Engine</button>
+        </div>
+    </header>
+
+    <section class="heartbeat-strip" id="heartbeat-strip">
+        <div class="hb-item">
+            <span class="hb-label">Uptime</span>
+            <span class="hb-value" id="hb-uptime">—</span>
+        </div>
+        <div class="hb-item">
+            <span class="hb-label">Last Scan</span>
+            <span class="hb-value" id="hb-last-scan">—</span>
+        </div>
+        <div class="hb-item">
+            <span class="hb-label">Loops</span>
+            <span class="hb-value" id="hb-loops">0</span>
+        </div>
+        <div class="hb-item">
+            <span class="hb-label">Symbols</span>
+            <span class="hb-value hb-chips" id="hb-symbols">—</span>
+        </div>
+        <div class="hb-item">
+            <span class="hb-label">Errors</span>
+            <span class="hb-value" id="hb-errors">0</span>
+        </div>
+        <div class="hb-warning hidden" id="hb-stale-warning">System may be hung — no recent scan</div>
+        <div class="hb-warning hidden" id="hb-server-warning"></div>
+    </section>
+
+    <div class="alert-banner hidden" id="alert-banner"></div>
+
+    <main class="dashboard">
+        <div class="metrics-grid five-col">
+            <div class="card metric-card">
+                <h3>Equity</h3>
+                <div class="metric" id="equity">—</div>
+            </div>
+            <div class="card metric-card">
+                <h3>Daily P&amp;L</h3>
+                <div class="metric" id="daily-pnl">—</div>
+            </div>
+            <div class="card metric-card">
+                <h3>Open Trades</h3>
+                <div class="metric" id="open-trades">0</div>
+                <div class="metric-sub muted" id="open-trades-detail"></div>
+            </div>
+            <div class="card metric-card">
+                <h3>Drawdown</h3>
+                <div class="metric" id="drawdown">—</div>
+            </div>
+            <div class="card metric-card">
+                <h3>Regime</h3>
+                <div class="metric regime" id="regime">—</div>
+            </div>
+        </div>
+
+        <div class="layout-grid">
+            <aside class="sidebar card">
+                <h3>Trading Pairs</h3>
+                <div class="pair-add">
+                    <select id="product-select" class="select">
+                        <option value="">Loading products…</option>
+                    </select>
+                    <button type="button" class="btn btn-add" id="btn-add-pair">Add</button>
+                </div>
+                <div class="active-pairs" id="active-pairs">
+                    <p class="muted">No active pairs</p>
+                </div>
+            </aside>
+
+            <div class="main-panel">
+                <div class="card position-status-card">
+                    <div class="card-header">
+                        <h3>Open Positions — Target &amp; SL Status</h3>
+                        <span class="muted" id="position-status-meta">No open positions</span>
+                    </div>
+                    <div id="position-status-panel" class="position-status-panel">
+                        <p class="muted">No open positions — start the engine to trade</p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Signal Log</h3>
+                    <div class="table-scroll" id="signal-log">
+                        <p class="muted">Waiting for engine activity…</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Errors &amp; Rejections</h3>
+                <span class="muted" id="errors-count">0 recent</span>
+            </div>
+            <div id="errors-log" class="table-scroll"></div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Adaptive Universe — Top 10 Active</h3>
+                <span class="muted" id="universe-meta">No scan yet</span>
+            </div>
+            <div id="universe-top" class="table-container"></div>
+        </div>
+
+        <div class="grid two-col">
+            <div class="card">
+                <h3>Open Positions</h3>
+                <div id="positions" class="table-container"></div>
+            </div>
+            <div class="card">
+                <h3>Strategy Scores (Live P&amp;L)</h3>
+                <div id="strategies" class="table-container"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h3>Backtest Scoreboard</h3>
+                <span class="muted">Full grid — score per (symbol, strategy)</span>
+            </div>
+            <div id="scoreboard" class="table-container"></div>
+        </div>
+
+        <div class="card">
+            <h3>Recent Trades</h3>
+            <div id="trades" class="table-container"></div>
+        </div>
+    </main>
+
+    <script src="/static/js/dashboard.js?v=7"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+position_sizing:
+  method: fixed_fractional  # fixed_fractional | volatility_adjusted | half_kelly
+  risk_per_trade_pct: 2.0
+  max_leverage: 5
+  min_order_size_usd: 10
+
+limits:
+  max_open_positions: 3
+  max_portfolio_heat_pct: 15.0
+  max_daily_loss_pct: 5.0
+  max_drawdown_pct: 15.0
+  max_correlated_exposure_multiplier: 1.5
+
+stops:
+  require_stop_loss: true
+  default_atr_multiplier: 2.0
+  trailing_stop_enabled: true
+
+circuit_breaker:
+  daily_loss_halt: true
+  max_drawdown_close_all: true
+  consecutive_loss_limit: 5
+  consecutive_loss_size_reduction: 0.5
+  data_feed_timeout_seconds: 300
+  max_consecutive_api_errors: 15
+  manual_resume_only: true  # no auto-resume; use `python main.py resume`
+  state_file: data/circuit_breaker_state.json
+  audit_file: logs/circuit_breaker_audit.log
+
+correlation_groups:
+  - [BTCUSDT, ETHUSDT]

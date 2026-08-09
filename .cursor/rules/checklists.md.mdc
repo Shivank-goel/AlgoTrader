@@ -1,0 +1,43 @@
+---
+description: Development and PR checklists
+alwaysApply: false
+---
+
+# Checklists
+
+## Pre-Commit
+
+- [ ] `python -m pytest tests/ -v` passes
+- [ ] No hardcoded secrets or API keys
+- [ ] Type hints on new public APIs
+- [ ] Config changes in YAML, not source
+- [ ] No new dependencies unless necessary (ponytail)
+
+## PR Checklist
+
+- [ ] Clear description of change and motivation
+- [ ] Risk assessment for live trading impact (if touching engine, risk, execution)
+- [ ] Config changes documented in PR description
+- [ ] Tests added/updated for non-trivial logic
+- [ ] No `ccxt` usage introduced
+
+## New Strategy Checklist
+
+- [ ] Extends `BaseStrategy` with `analyze()` and `get_preferred_regimes()`
+- [ ] Params in `config/strategies.yaml`
+- [ ] Registered in `src/strategies/selector.py`
+- [ ] Tests in `tests/test_strategies.py`
+- [ ] Regime preferences align with strategy logic
+
+## Live Trading Change Checklist
+
+- [ ] Paper/testnet validated first
+- [ ] Circuit breaker behavior unchanged or explicitly documented
+- [ ] Position sizing and risk limits reviewed
+- [ ] Idempotency preserved for order placement
+- [ ] Reconciliation path tested after crash scenarios
+
+## Dashboard/API Change Checklist
+
+- [ ] JSON error format: `{"error": "message"}`
+- [ ] No breaking changes to existing endpoints without migration note

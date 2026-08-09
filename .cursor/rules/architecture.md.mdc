@@ -1,0 +1,55 @@
+---
+description: System design and data flow
+alwaysApply: true
+---
+
+# Architecture
+
+Event-driven async system centered on `TradingEngine` (`src/core/engine.py`).
+
+## Data Flow
+
+```
+Universe scan → Candle fetch → Market state → Strategy signal → Risk check → Order execution → Event bus
+```
+
+1. **Universe scan** — `UniverseManager` / `SymbolScanner` finds liquid perpetuals; assigns strategies via quick backtests
+2. **Candle fetch** — multi-timeframe (15m signal, 1h trend, 4h context) via REST
+3. **Market state** — `MarketStateBuilder` + `RegimeDetector` (trending/ranging/volatile/quiet)
+4. **Strategy selection** — assigned strategy or `StrategySelector` picks highest-confidence signal
+5. **Risk check** — `RiskManager`, `PositionSizer`, circuit breakers, correlation limits
+6. **Execution** — `OrderManager` → `DeltaExchangeClient`; bracket SL/TP; idempotent via `client_order_id`
+7. **Events** — fills, regime changes, circuit breaker halts via `EventBus`
+
+## Module Map
+
+| Package | Responsibility |
+|---------|----------------|
+| `src/core/` | Engine, events, models, reconciler |
+| `src/data/` | DataManager, indicators, WebSocket |
+| `src/market/` | Regime detection, scanner, universe, state |
+| `src/strategies/` | 7 strategies + selector |
+| `src/risk/` | Position sizing, circuit breakers, manager |
+| `src/execution/` | Delta REST client, order manager |
+| `src/portfolio/` | Manager, trade journal (SQLite) |
+| `src/learning/` | Scorer, adapter, optimizer |
+| `src/notifications/` | Telegram |
+| `src/dashboard/` | FastAPI app + static UI |
+| `src/backtest/` | Quick backtester |
+
+## Persistence
+
+- **SQLite** (`data/trades.db`) — trade journal via SQLAlchemy (sync)
+- **JSON state** — `data/position_state.json`, circuit breaker state (fast restart, human-readable)
+
+## Key Patterns
+
+- **Strategy ABC** — `BaseStrategy` with `analyze()` + `get_preferred_regimes()`
+- **EventBus** — async pub/sub for fills, regime changes, circuit breakers
+- **Circuit breaker** — state persisted to JSON; manual resume only
+- **Idempotent orders** — UUID hex `client_order_id`; lookup-before-retry
+- **Startup reconciliation** — `StartupReconciler` compares local state vs exchange after crashes
+
+## Engine Loop
+
+~30s per symbol cycle. Universe rescan every 6 hours. Watchdog for stalled loops.

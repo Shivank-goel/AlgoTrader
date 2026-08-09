@@ -1,0 +1,92 @@
+enabled_strategies:
+  - ema_crossover
+  - supertrend
+  - donchian
+  - rsi_reversion
+  - bollinger
+  - macd
+  - volume_breakout
+
+regime_preferences:
+  trending:
+    - ema_crossover
+    - supertrend
+    - donchian
+    - macd
+  ranging:
+    - rsi_reversion
+    - bollinger
+  volatile:
+    - supertrend
+    - volume_breakout
+  quiet:
+    - volume_breakout
+    - bollinger
+
+parameters:
+  ema_crossover:
+    default:
+      fast_period: 12
+      slow_period: 26
+      trend_period: 200
+      adx_threshold: 25
+      atr_stop_multiplier: 2.0
+    trending:
+      fast_period: 9
+      slow_period: 21
+    ranging:
+      fast_period: 20
+      slow_period: 50
+
+  supertrend:
+    default:
+      atr_period: 10
+      multiplier: 3.0
+      trend_period: 200
+      rsi_lower: 30
+      rsi_upper: 70
+
+  donchian:
+    default:
+      entry_period: 20
+      exit_period: 10
+      volume_multiplier: 1.5
+
+  rsi_reversion:
+    default:
+      rsi_period: 14
+      rsi_lower: 30
+      rsi_upper: 70
+      adx_max: 20
+    ranging:
+      rsi_period: 14
+      rsi_lower: 30
+      rsi_upper: 70
+
+  bollinger:
+    default:
+      period: 20
+      std_dev: 2.0
+      adx_max: 20
+
+  macd:
+    default:
+      fast_period: 12
+      slow_period: 26
+      signal_period: 9
+      trend_period: 50
+
+  volume_breakout:
+    default:
+      consolidation_period: 20
+      volume_multiplier: 2.0
+      range_atr_multiplier: 1.5
+
+selector:
+  min_confidence: 0.5
+  max_concurrent_strategies: 2
+  performance_lookback_trades: 200
+  min_backtest_trades: 10
+  reassignment_margin: 0.2
+  rescan_interval_hours: 48
+  conflict_resolution: highest_confidence

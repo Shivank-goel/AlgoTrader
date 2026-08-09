@@ -1,0 +1,45 @@
+---
+description: Unit test generation prompt template
+alwaysApply: false
+---
+
+# Unit Tests Prompt
+
+Use when generating tests for Crypto-trader code.
+
+## Prompt
+
+Write unit tests for the selected code. Follow existing patterns in `tests/`:
+
+1. **Framework** — pytest + pytest-asyncio
+2. **Mock exchange** — `AsyncMock`, `unittest.mock.patch` at I/O boundary
+3. **Fixtures** — market states, candle DataFrames, regime enums
+4. **Naming** — `test_<module>_<scenario>`
+
+## Edge Cases
+
+- Empty candles, zero volume
+- Circuit breaker active (trading halted)
+- Position reconciliation mismatch
+- Duplicate `client_order_id` (idempotency)
+- Invalid/missing config
+
+## File Placement
+
+| Code Under Test | Test File |
+|-----------------|-----------|
+| Strategy | `tests/test_strategies.py` |
+| Risk | `tests/test_risk.py` |
+| Circuit breaker | `tests/test_circuit_breakers.py` |
+| Reconciliation | `tests/test_reconciliation.py` |
+| Execution | `tests/test_execution_idempotency.py` |
+| New module | `tests/test_<module>.py` |
+
+## Run
+
+```bash
+python -m pytest tests/ -v
+python -m pytest tests/test_<module>.py -v
+```
+
+One runnable check per non-trivial change. No test frameworks beyond pytest.

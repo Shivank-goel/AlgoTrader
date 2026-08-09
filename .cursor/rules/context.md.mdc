@@ -1,0 +1,50 @@
+---
+description: Project overview and key entry points
+alwaysApply: true
+---
+
+# Crypto-trader — Project Context
+
+Adaptive algorithmic trading system for **Delta Exchange India**. Detects market regimes, selects from 7 strategies via a meta-selector, enforces risk limits, and learns from rolling performance.
+
+## Modes
+
+| Mode | Command | Description |
+|------|---------|-------------|
+| Paper | `python main.py paper` | Testnet, simulated orders |
+| Live | `python main.py run` | Production engine |
+| Dashboard | `python main.py dashboard` | Web UI only |
+| Trade | `python main.py trade` | Dashboard + engine |
+
+## Key Entry Points
+
+| File | Role |
+|------|------|
+| [main.py](main.py) | CLI (Click) |
+| [src/core/engine.py](src/core/engine.py) | Trading orchestrator |
+| [src/dashboard/app.py](src/dashboard/app.py) | FastAPI web UI |
+| [src/execution/exchange.py](src/execution/exchange.py) | Delta REST client |
+| [src/strategies/selector.py](src/strategies/selector.py) | Strategy registry + selection |
+
+## Strategies (7)
+
+- **Trend:** EMA crossover, Supertrend, Donchian
+- **Mean reversion:** RSI reversion, Bollinger
+- **Momentum:** MACD
+- **Breakout:** Volume breakout
+
+## Configuration
+
+- `config/settings.yaml` — exchange URLs, engine timing, universe
+- `config/risk.yaml` — position sizing, limits, circuit breakers
+- `config/strategies.yaml` — strategy params and selector config
+- `.env` — `DELTA_API_KEY`, `DELTA_API_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+
+## External Services
+
+- **Delta Exchange India** — REST + WebSocket (prod + testnet)
+- **Telegram Bot API** — trade alerts, circuit breaker notifications
+
+## Default Risk Assumptions
+
+2% per trade, 5% daily loss halt, 15% max drawdown, 5x max leverage, 3 max open positions.

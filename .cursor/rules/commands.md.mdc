@@ -1,0 +1,66 @@
+---
+description: Common development commands
+alwaysApply: false
+---
+
+# Commands
+
+## Setup
+
+```bash
+cd Crypto-trader
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env
+# Edit .env with API keys
+```
+
+## Run Modes
+
+```bash
+python main.py paper       # Paper trading (testnet)
+python main.py run         # Live trading engine
+python main.py dashboard   # Web dashboard only
+python main.py trade       # Dashboard + engine (start via UI)
+python main.py status      # Portfolio snapshot
+python main.py resume      # Manual circuit breaker resume
+python main.py reconcile   # Crash recovery position sync
+```
+
+## Tests
+
+```bash
+python -m pytest tests/ -v
+python -m pytest tests/test_strategies.py -v
+python -m pytest tests/test_circuit_breakers.py -v
+```
+
+## Backtest & Optimize
+
+```bash
+python scripts/backtest.py --symbol BTCUSDT --start 2026-01-01 --end 2026-06-30
+python scripts/optimize.py --symbol BTCUSDT --is-window 90 --oos-window 30
+```
+
+## Dashboard
+
+```bash
+python main.py dashboard
+# Or: scripts/start_dashboard.sh (run from Terminal.app, not Cursor sandbox)
+# Default: http://127.0.0.1:8080
+```
+
+## Demo Scripts
+
+```bash
+python scripts/test_demo_connection.py
+python scripts/test_demo_trade.py
+python scripts/test_full_pipeline.py
+```
+
+## Config
+
+- `config/settings.yaml` — exchange, engine, universe
+- `config/risk.yaml` — sizing, limits, circuit breakers
+- `config/strategies.yaml` — strategy params

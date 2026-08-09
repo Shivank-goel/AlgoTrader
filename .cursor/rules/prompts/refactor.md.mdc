@@ -1,0 +1,30 @@
+---
+description: Refactoring prompt template
+alwaysApply: false
+---
+
+# Refactor Prompt
+
+Use when refactoring Crypto-trader code. Align with ponytail: smallest diff, no new abstractions unless requested.
+
+## Prompt
+
+Refactor the selected code with these constraints:
+
+1. **Smallest working diff** — no drive-by changes
+2. **Reuse existing patterns** — grep for similar logic before adding helpers
+3. **No new abstractions** unless explicitly requested
+4. **Fix in shared code** — if multiple callers share a bug, fix the shared function once
+
+## Focus Areas
+
+- Reduce `src/core/engine.py` complexity (extract only if pattern repeats 3+ times)
+- Consolidate repeated indicator/candle logic into `src/data/`
+- Move magic numbers to `config/*.yaml`
+- Keep async boundaries clear (don't mix sync DB into hot paths unnecessarily)
+
+## Avoid
+
+- New base classes or plugin systems
+- Premature optimization
+- Renaming for style only

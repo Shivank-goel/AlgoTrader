@@ -1,0 +1,71 @@
+---
+description: API standards for dashboard and exchange
+globs: src/dashboard/**/*.py,src/execution/**/*.py
+alwaysApply: false
+---
+
+# API Standards
+
+## Internal Dashboard (FastAPI)
+
+- Default: `http://127.0.0.1:8080`
+- JSON responses; HTML only for `/`
+
+### Endpoint Patterns
+
+| Method | Pattern | Example |
+|--------|---------|---------|
+| GET | `/api/<resource>` | `/api/positions`, `/api/status` |
+| GET | `/api/<resource>/{id}` | `/api/candles/{symbol}`, `/api/regime/{symbol}` |
+| POST | `/api/<resource>/<action>` | `/api/engine/start`, `/api/universe/rescan` |
+| POST | `/api/<resource>` | `/api/pairs`, `/api/mode` |
+| DELETE | `/api/<resource>/{id}` | `/api/pairs/{symbol}` |
+
+### Key Endpoints
+
+- `/api/engine/start`, `/api/engine/stop` — engine control
+- `/api/heartbeat` — engine state/uptime
+- `/api/mode` — get/set demo vs live
+- `/api/universe`, `/api/universe/rescan` — universe management
+- `/api/positions`, `/api/trades`, `/api/status` — portfolio
+- `/api/signals`, `/api/regime/{symbol}` — strategy output
+
+### Error Responses
+
+```json
+{"error": "message"}
+```
+
+Use appropriate HTTP status: 400 (bad request), 404 (not found), 500 (server error).
+
+## Delta Exchange REST
+
+Client: `src/execution/exchange.py`
+
+### Base URLs
+
+| Env | REST | WebSocket |
+|-----|------|-----------|
+| Prod | `https://api.india.delta.exchange` | `wss://socket.india.delta.exchange` |
+| Testnet | `https://cdn-ind.testnet.deltaex.org` | `wss://socket-ind.testnet.deltaex.org` |
+
+### Endpoints Used
+
+- `GET /v2/products`, `GET /v2/tickers/{symbol}`
+- `GET /v2/history/candles`
+- `GET /v2/wallet/balances`, `GET /v2/positions`, `GET /v2/positions/margined`
+- `POST /v2/orders`, `GET /v2/orders/{id}`, `DELETE /v2/orders/{id}`
+- `GET /v2/orders/client_order_id/{id}` — idempotency lookup
+- `POST /v2/orders/bracket` — SL/TP
+
+### Conventions
+
+- HMAC signing on all authenticated requests
+- Rate-limit aware; backoff on 429
+- `client_order_id` (UUID hex) for idempotent placement
+
+## WebSocket
+
+- Reconnect on drop
+- Heartbeat pings
+- Candle/ticker subscriptions per symbol
