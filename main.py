@@ -179,6 +179,69 @@ def optimize(ctx, symbol, is_window, oos_window):
     console.print("Use: python scripts/optimize.py --symbol BTCUSDT")
 
 
+@cli.command("fetch-history")
+@click.option("--symbol", "symbols", multiple=True, help="Repeatable; default BTCUSD ETHUSD SOLUSD")
+@click.option("--timeframe", "timeframes", multiple=True, help="Repeatable; default 15m 1h 4h")
+@click.option("--days", default=365, type=int, help="How far back to pull")
+@click.option("--prod/--testnet", default=True, help="Pull from production (real prices)")
+@click.pass_context
+def fetch_history(ctx, symbols, timeframes, days, prod):
+    """Backfill real OHLCV history into data/hist/*.parquet.
+
+    Defaults to production because the candles endpoint is public — real
+    history must not require flipping exchange.testnet, and testnet prices are
+    synthetic (frozen tails, flat bars, PAXGUSD at $0.01).
+    """
+    from src.data.manager import DataManager
+    from src.execution.exchange import DeltaExchangeClient
+
+    symbols = symbols or ("BTCUSD", "ETHUSD", "SOLUSD")
+    timeframes = timeframes or ("15m", "1h", "4h")
+
+    with open(Path(ctx.obj["config"]) / "settings.yaml") as fh:
+        exchange_cfg = (yaml.safe_load(fh) or {})["exchange"]
+    base_url = exchange_cfg["base_url_prod"] if prod else exchange_cfg["base_url_testnet"]
+
+    # No credentials: /v2/history/candles is a public endpoint.
+    client = DeltaExchangeClient(api_key="", api_secret="", base_url=base_url, testnet=not prod)
+    manager = DataManager(client)
+
+    console.print(
+        f"[bold]Backfilling {days}d[/bold] from "
+        f"[cyan]{'production' if prod else 'testnet'}[/cyan] ({base_url})"
+    )
+
+    table = Table(title="Backfilled History")
+    for col in ("Symbol", "TF", "Bars", "Days", "Start", "End", "Flat %"):
+        table.add_column(col, style="cyan" if col == "Symbol" else None)
+
+    async def main():
+        try:
+            for symbol in symbols:
+                for tf in timeframes:
+                    df = await manager.backfill(symbol, tf, days=days)
+                    info = manager.describe_history(df)
+                    if not info["bars"]:
+                        table.add_row(symbol, tf, "0", "-", "-", "-", "-")
+                        continue
+                    flat_pct = info["flat_pct"]
+                    table.add_row(
+                        symbol,
+                        tf,
+                        str(info["bars"]),
+                        str(info["days"]),
+                        str(info["start"].date()),
+                        str(info["end"].date()),
+                        f"[red]{flat_pct}[/red]" if flat_pct > 5 else str(flat_pct),
+                    )
+        finally:
+            await client.close()
+
+    asyncio.run(main())
+    console.print(table)
+    console.print("[dim]A high flat-bar % means a synthetic or dead feed.[/dim]")
+
+
 @cli.command("news")
 @click.option("--once", is_flag=True, help="Poll a single time and exit")
 @click.option("--interval", default=900, type=int, help="Seconds between polls")
