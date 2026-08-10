@@ -242,6 +242,77 @@ def fetch_history(ctx, symbols, timeframes, days, prod):
     console.print("[dim]A high flat-bar % means a synthetic or dead feed.[/dim]")
 
 
+@cli.command("microstructure")
+@click.option("--once", is_flag=True, help="Take a single snapshot and exit")
+@click.option("--interval", default=300, type=int, help="Seconds between snapshots")
+@click.option("--stats", is_flag=True, help="Show what has been collected and exit")
+@click.option("--min-turnover", default=1_000_000.0, type=float)
+@click.pass_context
+def microstructure(ctx, once, interval, stats, min_turnover):
+    """Record funding rate, open interest and basis into data/microstructure.parquet.
+
+    Records only — no features, no signals. These fields have no history on the
+    exchange, so a strategy needing six months of funding data can only start
+    accumulating it today.
+    """
+    from src.market.microstructure import MicrostructureRecorder, MicrostructureSnapshot
+
+    recorder = MicrostructureRecorder()
+
+    if stats:
+        info = recorder.stats()
+        table = Table(title="Recorded Microstructure")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="green")
+        for key, value in info.items():
+            table.add_row(key, str(value))
+        console.print(table)
+        return
+
+    with open(Path(ctx.obj["config"]) / "settings.yaml") as fh:
+        exchange_cfg = (yaml.safe_load(fh) or {})["exchange"]
+
+    async def snapshot_once(client) -> int:
+        result = await client._request(
+            "GET", "/v2/tickers", params={"contract_types": "perpetual_futures"}
+        )
+        rows = result if isinstance(result, list) else result.get("result", [])
+        snaps = [
+            MicrostructureSnapshot.from_ticker(t.get("symbol", ""), t)
+            for t in rows
+            if float(t.get("turnover_usd") or 0) >= min_turnover
+        ]
+        recorder.record(snaps)
+        recorder.flush()
+        return len(snaps)
+
+    async def main():
+        from src.execution.exchange import DeltaExchangeClient
+
+        client = DeltaExchangeClient(
+            api_key="", api_secret="",
+            base_url=exchange_cfg["base_url_prod"], testnet=False,
+        )
+        try:
+            if once:
+                n = await snapshot_once(client)
+                console.print(f"[green]recorded {n} symbol snapshot(s)[/green]")
+                return
+            console.print(f"[dim]Recording every {interval}s — Ctrl-C to stop[/dim]")
+            while True:
+                n = await snapshot_once(client)
+                console.print(f"[dim]{n} symbols recorded[/dim]")
+                await asyncio.sleep(interval)
+        finally:
+            recorder.flush()
+            await client.close()
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Recorder stopped[/yellow]")
+
+
 @cli.command("news")
 @click.option("--once", is_flag=True, help="Poll a single time and exit")
 @click.option("--interval", default=900, type=int, help="Seconds between polls")
