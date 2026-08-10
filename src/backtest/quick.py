@@ -18,6 +18,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from src.backtest.costs import CostModel
 from src.core.models import Direction, MarketState, Regime
 from src.data.indicators import IndicatorEngine
 from src.market.regime import RegimeDetector
@@ -43,6 +44,11 @@ class BacktestResult:
     score: float = 0.0
     t_stat: float = 0.0
     trade_pnls: list[float] = field(default_factory=list)
+    # Cost attribution — the difference between these two is the whole point
+    # of modelling costs at all.
+    gross_return_pct: float = 0.0
+    costs_pct: float = 0.0
+    trade_log: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -52,7 +58,9 @@ class BacktestResult:
             "wins": int(self.wins),
             "losses": int(self.losses),
             "win_rate": round(float(self.win_rate), 4),
+            "gross_return_pct": round(float(self.gross_return_pct), 3),
             "total_return_pct": round(float(self.total_return_pct), 3),
+            "costs_pct": round(float(self.costs_pct), 3),
             "avg_return_pct": round(float(self.avg_return_pct), 4),
             "expectancy_pct": round(float(self.expectancy_pct), 4),
             "sharpe": round(float(self.sharpe), 3),
@@ -75,6 +83,8 @@ class QuickBacktester:
         max_hold_bars: int = 96,  # ~24h on 15m
         risk_per_trade_pct: float = 1.0,
         min_trades: int = 10,
+        cost_model: Optional[CostModel] = None,
+        notional_usd: float = 1_000.0,
     ) -> None:
         self.indicators = indicators or IndicatorEngine()
         self.min_bars = min_bars
@@ -84,6 +94,11 @@ class QuickBacktester:
         self.max_hold_bars = max_hold_bars
         self.risk_per_trade_pct = risk_per_trade_pct
         self.min_trades = min_trades
+        # Same model the live paper path uses. Pass CostModel.zero() to measure
+        # the gross strategy signal in isolation.
+        self.cost_model = cost_model if cost_model is not None else CostModel()
+        # Reference order size for the size-vs-liquidity slippage term.
+        self.notional_usd = notional_usd
 
     def run(
         self,
@@ -101,15 +116,24 @@ class QuickBacktester:
 
         regime_detector = RegimeDetector()
         builder = MarketStateBuilder(self.indicators, regime_detector)
+        # One pass over the frame instead of rebuilding state per bar.
+        prepared = builder.prepare(symbol, df)
 
         highs = df["high"].to_numpy(dtype=float)
         lows = df["low"].to_numpy(dtype=float)
         closes = df["close"].to_numpy(dtype=float)
         atrs = df["atr_14"].to_numpy(dtype=float) if "atr_14" in df.columns else np.full(len(df), np.nan)
+        volumes = (
+            df["volume"].to_numpy(dtype=float)
+            if "volume" in df.columns
+            else np.full(len(df), np.nan)
+        )
+        timestamps = df.index.to_pydatetime() if isinstance(df.index, pd.DatetimeIndex) else None
 
         in_pos = False
         pos_side: Optional[Direction] = None
         entry_price = 0.0
+        entry_idx = 0
         stop = 0.0
         target = 0.0
         bars_held = 0
@@ -117,6 +141,7 @@ class QuickBacktester:
         peak = 1.0
         max_dd = 0.0
         returns: list[float] = []
+        gross_returns: list[float] = []
 
         n = len(df)
         for i in range(self.min_bars, n, self.step):
@@ -142,18 +167,56 @@ class QuickBacktester:
                     exit_reason = "time"
 
                 if exit_reason:
-                    pnl_pct = self._pnl_pct(entry_price, exit_price, pos_side)
+                    # Slip the exit too. Treating a target as an exact limit
+                    # fill is the optimism bias most backtests leave in: a stop
+                    # or target is a market exit in practice, and pretending
+                    # otherwise credits the strategy with free execution.
+                    filled_exit = self.cost_model.exit_fill_price(
+                        exit_price,
+                        pos_side,
+                        atr=None if math.isnan(atrs[i]) else atrs[i],
+                        bar_volume_usd=self._bar_volume_usd(volumes, closes, i),
+                        notional=self.notional_usd,
+                    )
+                    gross_pct = self._pnl_pct(entry_price, filled_exit, pos_side)
+
+                    cost_pct = self.cost_model.round_trip_cost_pct(
+                        entry_price=entry_price,
+                        exit_price=filled_exit,
+                        direction=pos_side,
+                        entry_ts=timestamps[entry_idx] if timestamps is not None else None,
+                        exit_ts=timestamps[i] if timestamps is not None else None,
+                        size=self.notional_usd / entry_price if entry_price > 0 else 1.0,
+                    )
+                    pnl_pct = gross_pct - cost_pct
+
                     equity *= 1.0 + (pnl_pct / 100.0) * (self.risk_per_trade_pct / 100.0)
                     peak = max(peak, equity)
                     dd = (peak - equity) / peak if peak > 0 else 0.0
                     max_dd = max(max_dd, dd)
                     returns.append(pnl_pct)
+                    gross_returns.append(gross_pct)
                     result.trade_pnls.append(pnl_pct)
                     result.trades += 1
                     if pnl_pct > 0:
                         result.wins += 1
                     else:
                         result.losses += 1
+                    result.trade_log.append(
+                        {
+                            "entry_idx": entry_idx,
+                            "exit_idx": i,
+                            "entry_ts": timestamps[entry_idx] if timestamps is not None else None,
+                            "exit_ts": timestamps[i] if timestamps is not None else None,
+                            "side": pos_side.value,
+                            "entry_price": entry_price,
+                            "exit_price": filled_exit,
+                            "gross_pct": gross_pct,
+                            "cost_pct": cost_pct,
+                            "net_pct": pnl_pct,
+                            "reason": exit_reason,
+                        }
+                    )
                     in_pos = False
                     pos_side = None
                     bars_held = 0
@@ -163,8 +226,7 @@ class QuickBacktester:
                 continue
 
             try:
-                window = df.iloc[: i + 1]
-                state = builder.build(symbol, window)
+                state = builder.build_at(prepared, i)
             except Exception:
                 continue
 
@@ -183,8 +245,17 @@ class QuickBacktester:
             if atr <= 0:
                 continue
 
-            entry_price = price
             pos_side = signal.direction
+            # Enter at a slipped price, and set stop/target from the actual
+            # fill rather than from the unattainable mid.
+            entry_price = self.cost_model.entry_fill_price(
+                price,
+                pos_side,
+                atr=atr,
+                bar_volume_usd=self._bar_volume_usd(volumes, closes, i),
+                notional=self.notional_usd,
+            )
+            entry_idx = i
             if pos_side == Direction.LONG:
                 stop = entry_price - self.atr_stop_mult * atr
                 target = entry_price + self.atr_target_mult * atr
@@ -198,6 +269,8 @@ class QuickBacktester:
 
         if result.trades > 0:
             arr = np.array(returns)
+            result.gross_return_pct = float(np.array(gross_returns).sum())
+            result.costs_pct = result.gross_return_pct - float(arr.sum())
             result.total_return_pct = float(arr.sum())
             result.avg_return_pct = float(arr.mean())
             result.win_rate = result.wins / result.trades
@@ -216,6 +289,14 @@ class QuickBacktester:
 
         result.score = self._score(result)
         return result
+
+    @staticmethod
+    def _bar_volume_usd(volumes, closes, i: int) -> Optional[float]:
+        """Approximate USD traded in bar i, for the slippage impact term."""
+        vol = volumes[i]
+        if vol is None or math.isnan(vol) or vol <= 0:
+            return None
+        return float(vol) * float(closes[i])
 
     @staticmethod
     def _pnl_pct(entry: float, exit_price: float, side: Direction) -> float:
