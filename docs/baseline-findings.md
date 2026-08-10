@@ -105,6 +105,99 @@ multiple-testing correction, not a leaderboard.
 3. Whatever is tried next must be validated walk-forward with a multiple-testing
    correction, or it will keep producing results like the 4h "winner" above.
 
+---
+
+# Round 2 — cross-sectional strategies
+
+**Date:** 2026-08-10. Same data, same cost model, maker entries throughout.
+
+## A correction to Round 2's exploratory phase
+
+An exploratory script reported that cross-sectional **momentum was reliably
+negative** (t = −2.95) and that reversal was therefore the signal. **That was
+backwards.** The script used `sort_values(ascending=reverse)`, so its "momentum"
+branch sorted *descending* and then took `index[-k:]` — the **lowest**-ranked
+names — and went long them. Both labels were inverted.
+
+Corrected, with a hand-rolled unambiguous check (168h formation / 72h hold, six
+symbols, gross):
+
+```
+MOMENTUM (long winners, short losers):  n=240  +76.8%  +32.0 bps/reb  t = +2.10
+REVERSAL (long losers, short winners):  n=240  -76.8%  -32.0 bps/reb  t = -2.10
+```
+
+Momentum is the positive side. This also agrees with the published crypto
+cross-sectional momentum literature — the earlier result contradicting it should
+have been treated as a red flag rather than a finding.
+
+`src/strategies/xs_momentum.py` now uses an explicit `Tilt` enum
+(`LONG_WINNERS` / `LONG_LOSERS`) instead of a bare sign, and
+`test_long_winners_actually_buys_the_winners` pins the semantics.
+
+## Result: cross-sectional momentum — FAILS the pass mark
+
+Universe: ADAUSD, XRPUSD, DOGEUSD, ETHUSD (the four with workable contract
+granularity at ₹10,000). 1h bars, 730 days, market-neutral, maker entries.
+
+Best configuration — 168h formation, 168h hold:
+
+| Metric | Value |
+|---|---|
+| Gross / costs / **net** | 58.6% / 9.3% / **+49.3%** over 2 years |
+| Rebalances | 102 |
+| Mean | 48.3 bps per rebalance |
+| Sharpe (annualised) | 1.31 |
+| t-statistic | 1.83 |
+| Max drawdown | 10.5% |
+| Win rate | 51% |
+
+**Pre-committed pass mark:**
+
+| Criterion | Result | |
+|---|---|---|
+| Deflated Sharpe > 0.95 | **0.19** (n_trials = 144) | **FAIL** |
+| Positive in both years | Y1 +54.6%, Y2 +4.6% | PASS |
+| ≥ 100 observations | 102 | PASS |
+
+**Verdict: FAIL.**
+
+This is the closest anything has come — the first and only strategy to be
+profitable in both the bull and the bear year, and with a 10.5% drawdown rather
+than the 30%+ of the reversal variants. But the quarterly breakdown shows why
+the deflated Sharpe is right to reject it:
+
+```
+Q1 (H1 2025): n=24  +41.24%   Sharpe +3.38
+Q2:           n=24   +6.30%   Sharpe +0.71
+Q3:           n=24   -2.14%   Sharpe -0.34
+Q4 (H1 2026): n=24   +3.84%   Sharpe +0.60
+```
+
+**Q1 carries +41.2 of the +49.3 points.** The remaining eighteen months produce
++8%. That is one good half-year, not a persistent edge, and with only 102
+observations against 144 recorded trials it cannot be separated from luck.
+
+## Also recorded as negative
+
+- **Cross-sectional reversal**: 36 configurations, 0 with t > 2, best t = 0.49,
+  best config +36% in the bull year and −22.5% in the bear.
+- **Volatility-normalised ranking** and **inverse-volatility leg weighting**:
+  both were expected to raise power and both made results *worse* on this
+  universe. They remain in the code but default to off.
+- **Hour-of-day seasonality**: 24 hours tested, best +3.22 bps against an 8.26
+  bps cost, no |t| above 2.2. Dead.
+- **Pair spread mean-reversion**: 54 configurations across six pairs, 0 with
+  t > 2, best t = 0.82 (ADA/XRP, +25% annualised, 65% win rate).
+
+## The venue constraint, measured
+
+Delta India lists **8 liquid perpetuals**, and only BTC/ETH/SOL/XRP have real
+depth — BMTUSD shows $48M turnover against $236k open interest, which is churn,
+not liquidity. Cross-sectional strategies are the most promising family found,
+and they are precisely the family most starved by a four-name cross-section. The
+published results this approach is based on use hundreds of coins.
+
 ## Reproducing
 
 ```bash
