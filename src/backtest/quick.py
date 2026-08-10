@@ -48,6 +48,9 @@ class BacktestResult:
     # of modelling costs at all.
     gross_return_pct: float = 0.0
     costs_pct: float = 0.0
+    # Signals whose passive entry never filled. High counts mean the maker-fee
+    # saving is being paid for in missed participation.
+    missed_entries: int = 0
     trade_log: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -67,6 +70,7 @@ class BacktestResult:
             "max_drawdown_pct": round(float(self.max_drawdown_pct), 3),
             "t_stat": round(float(self.t_stat), 3),
             "score": round(float(self.score), 4),
+            "missed_entries": int(self.missed_entries),
         }
 
 
@@ -85,6 +89,7 @@ class QuickBacktester:
         min_trades: int = 10,
         cost_model: Optional[CostModel] = None,
         notional_usd: float = 1_000.0,
+        maker_entry: bool = False,
     ) -> None:
         self.indicators = indicators or IndicatorEngine()
         self.min_bars = min_bars
@@ -99,6 +104,9 @@ class QuickBacktester:
         self.cost_model = cost_model if cost_model is not None else CostModel()
         # Reference order size for the size-vs-liquidity slippage term.
         self.notional_usd = notional_usd
+        # Passive (post-only) entries pay the maker fee and no slippage, but
+        # only fill if price comes back to them. Exits stay aggressive.
+        self.maker_entry = maker_entry
 
     def run(
         self,
@@ -187,6 +195,7 @@ class QuickBacktester:
                         entry_ts=timestamps[entry_idx] if timestamps is not None else None,
                         exit_ts=timestamps[i] if timestamps is not None else None,
                         size=self.notional_usd / entry_price if entry_price > 0 else 1.0,
+                        maker_entry=self.maker_entry,
                     )
                     pnl_pct = gross_pct - cost_pct
 
@@ -246,16 +255,41 @@ class QuickBacktester:
                 continue
 
             pos_side = signal.direction
-            # Enter at a slipped price, and set stop/target from the actual
-            # fill rather than from the unattainable mid.
-            entry_price = self.cost_model.entry_fill_price(
-                price,
-                pos_side,
-                atr=atr,
-                bar_volume_usd=self._bar_volume_usd(volumes, closes, i),
-                notional=self.notional_usd,
-            )
-            entry_idx = i
+
+            if self.maker_entry:
+                # Post-only limit resting at this bar's close, checked against
+                # the NEXT bar. It fills only if price trades back through the
+                # level; otherwise the trade is missed.
+                #
+                # Modelling the miss is the whole point. Booking a maker fee
+                # while assuming every entry fills would hand the strategy the
+                # cheaper fee AND perfect participation, which is precisely the
+                # adverse selection that makes real passive entries underperform
+                # the naive fee arithmetic: the trades you miss are the ones
+                # that ran away in your favour.
+                if i + 1 >= n:
+                    continue
+                limit_price = price
+                if pos_side == Direction.LONG:
+                    filled = lows[i + 1] <= limit_price
+                else:
+                    filled = highs[i + 1] >= limit_price
+                if not filled:
+                    result.missed_entries += 1
+                    continue
+                entry_price = limit_price
+                entry_idx = i + 1
+            else:
+                # Aggressive entry: slipped, and the stop/target are set from
+                # the actual fill rather than the unattainable mid.
+                entry_price = self.cost_model.entry_fill_price(
+                    price,
+                    pos_side,
+                    atr=atr,
+                    bar_volume_usd=self._bar_volume_usd(volumes, closes, i),
+                    notional=self.notional_usd,
+                )
+                entry_idx = i
             if pos_side == Direction.LONG:
                 stop = entry_price - self.atr_stop_mult * atr
                 target = entry_price + self.atr_target_mult * atr

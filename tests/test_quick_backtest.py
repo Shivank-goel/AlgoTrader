@@ -139,6 +139,74 @@ def test_every_trade_records_a_positive_cost(priced):
     assert all(t["net_pct"] < t["gross_pct"] for t in result.trade_log)
 
 
+def test_maker_entry_is_cheaper_per_trade_than_taker(priced):
+    taker = QuickBacktester(cost_model=CostModel()).run("BTCUSD", _AlwaysLong(), priced)
+    maker = QuickBacktester(cost_model=CostModel(), maker_entry=True).run(
+        "BTCUSD", _AlwaysLong(), priced
+    )
+
+    taker_bps = taker.costs_pct / taker.trades * 100
+    maker_bps = maker.costs_pct / maker.trades * 100
+    assert maker_bps < taker_bps
+
+
+def test_maker_entries_miss_when_price_gaps_away(synthetic_ohlcv):
+    """A passive entry that never fills is a missed trade, not a free one.
+
+    Counting misses is what stops maker mode from quietly granting both the
+    cheaper fee and perfect participation.
+
+    Note the synthetic fixture is gapless (open[i+1] == close[i], and low is
+    always below open), so a resting buy limit there always fills. Real data
+    gaps; this frame is lifted above the prior close on every bar so the limit
+    can never be touched.
+    """
+    import numpy as np
+
+    n = 600
+    rng = np.random.default_rng(3)
+    # Every bar's LOW sits above the previous bar's CLOSE, so a buy limit
+    # resting at that close can never be touched.
+    close = 100.0 * np.cumprod(1.0 + rng.uniform(0.002, 0.006, size=n))
+    low = np.concatenate([[close[0] * 0.999], close[:-1] * 1.0005])
+    high = np.maximum(close, low) * (1.0 + rng.uniform(0.0005, 0.002, size=n))
+    open_ = (low + np.minimum(close, high)) / 2.0
+
+    raw = pd.DataFrame(
+        {
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "volume": rng.uniform(500, 1500, size=n),
+        },
+        index=pd.date_range("2026-01-01", periods=n, freq="15min"),
+    )
+    assert (raw["low"].to_numpy()[1:] > raw["close"].to_numpy()[:-1]).all()
+
+    gapping = IndicatorEngine().compute_all(raw.copy())
+    result = QuickBacktester(cost_model=CostModel(), maker_entry=True).run(
+        "BTCUSD", _AlwaysLong(), gapping
+    )
+
+    assert result.missed_entries > 0, "a buy limit filled in a market that never traded down"
+    assert result.trades == 0, "a passive entry filled despite price gapping away every bar"
+    assert result.to_dict()["missed_entries"] == result.missed_entries
+
+
+def test_maker_entry_fills_at_the_limit_not_worse(priced):
+    """A passive fill must never be slipped — that is the point of resting."""
+    result = QuickBacktester(cost_model=CostModel(), maker_entry=True).run(
+        "BTCUSD", _AlwaysLong(), priced
+    )
+    assert result.trade_log
+
+    for trade in result.trade_log[:20]:
+        # The limit rests at the close of the bar BEFORE the entry bar.
+        limit = float(priced["close"].iloc[trade["entry_idx"] - 1])
+        assert trade["entry_price"] == pytest.approx(limit)
+
+
 def test_zero_cost_model_reproduces_frictionless_behaviour(priced):
     result = QuickBacktester(cost_model=CostModel.zero()).run("BTCUSD", _AlwaysLong(), priced)
     assert result.costs_pct == pytest.approx(0.0, abs=1e-9)

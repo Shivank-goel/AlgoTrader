@@ -195,6 +195,15 @@ class CostModel:
         rate = self.maker_fee_bps if maker else self.taker_fee_bps
         return 2.0 * rate
 
+    def entry_exit_fee_bps(self, *, maker_entry: bool = False) -> float:
+        """Round-trip fee for a passive entry and an aggressive exit.
+
+        Exits are market orders even under a maker-entry policy: a stop that
+        rests as a limit is a stop that does not protect you.
+        """
+        entry = self.maker_fee_bps if maker_entry else self.taker_fee_bps
+        return entry + self.taker_fee_bps
+
     # -- funding --------------------------------------------------------
 
     def funding_periods(self, entry_ts: datetime, exit_ts: datetime) -> int:
@@ -255,11 +264,14 @@ class CostModel:
         exit_ts: Optional[datetime] = None,
         size: float = 1.0,
         maker: bool = False,
+        maker_entry: bool = False,
         funding_rate_bps: Optional[float] = None,
     ) -> float:
         """Total round-trip cost as a percentage of entry notional.
 
         Returned as a positive percentage to subtract from a gross return.
+        `maker_entry` prices a passive entry with an aggressive exit; `maker`
+        prices both legs passively.
         """
         if entry_price <= 0 or size <= 0:
             return 0.0
@@ -267,7 +279,8 @@ class CostModel:
         entry_notional = entry_price * size
         exit_notional = exit_price * size
 
-        fees = self.fee_usd(entry_notional, maker=maker) + self.fee_usd(
+        entry_is_maker = maker or maker_entry
+        fees = self.fee_usd(entry_notional, maker=entry_is_maker) + self.fee_usd(
             exit_notional, maker=maker
         )
 
