@@ -190,6 +190,39 @@ observations against 144 recorded trials it cannot be separated from luck.
 - **Pair spread mean-reversion**: 54 configurations across six pairs, 0 with
   t > 2, best t = 0.82 (ADA/XRP, +25% annualised, 65% win rate).
 
+## Result: price action (swing rejection, structural stops) — FAILS, badly
+
+Rejection candle (pin bar or engulfing) at a confirmed swing level, with the
+stop placed just beyond the level rather than at a fixed ATR multiple. Run with
+`QuickBacktester(honor_signal_levels=True)` so the strategy's own stop is
+actually the one tested — under the default the backtester overrides every
+strategy with a uniform 2×ATR stop, which would make a structural-stop
+hypothesis untestable.
+
+18 configurations across 1h and 4h, four symbols, maker entries:
+
+| tf | proximity | RR | trades | bps/trade | net | win% | t |
+|---|---|---|---|---|---|---|---|
+| 4h | 0.3 | 3.0 | 89 | −41.6 | −37.1% | 22.5 | −4.03 |
+| 4h | 0.3 | 2.0 | 89 | −42.8 | −38.1% | 29.2 | −5.04 |
+| 1h | 0.3 | 1.5 | 865 | −41.3 | −357.6% | 35.7 | −16.86 |
+| 1h | 1.0 | 1.5 | 2964 | −44.8 | −1327.6% | 35.4 | −24.36 |
+
+**Every configuration is deeply negative**, at −41 to −55 bps per trade against
+the indicator strategies' −19. t-statistics run from −4 to −24; the *best* case
+is significantly bad.
+
+The hypothesis was that a structural stop would be better justified than an
+arbitrary ATR multiple and so raise edge per trade. The opposite happened:
+structural stops at these timeframes are *tight*, frequently below the 0.57%
+sizable floor and clamped up to it, and they get hit far more often than the
+2–3× reward:risk compensates for. Win rates land at 20–36% when 25–40% is
+needed just to break even before costs.
+
+Recorded so it is not retried: price action was tested properly, with lookahead
+control on the swing columns and with the backtester honouring its stops, and it
+is materially worse than what it was meant to replace.
+
 ## The venue constraint, measured
 
 Delta India lists **8 liquid perpetuals**, and only BTC/ETH/SOL/XRP have real

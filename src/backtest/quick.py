@@ -51,6 +51,8 @@ class BacktestResult:
     # Signals whose passive entry never filled. High counts mean the maker-fee
     # saving is being paid for in missed participation.
     missed_entries: int = 0
+    # Signals rejected because the requested stop was already through the fill.
+    unfillable_stops: int = 0
     trade_log: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -90,6 +92,7 @@ class QuickBacktester:
         cost_model: Optional[CostModel] = None,
         notional_usd: float = 1_000.0,
         maker_entry: bool = False,
+        honor_signal_levels: bool = False,
     ) -> None:
         self.indicators = indicators or IndicatorEngine()
         self.min_bars = min_bars
@@ -107,6 +110,11 @@ class QuickBacktester:
         # Passive (post-only) entries pay the maker fee and no slippage, but
         # only fill if price comes back to them. Exits stay aggressive.
         self.maker_entry = maker_entry
+        # Off by default: turning it on changes every historical baseline,
+        # because BaseStrategy.get_take_profit is hardcoded to 2x the stop
+        # multiplier and so moves the target from 3xATR to 4xATR. Required for
+        # any strategy whose stop placement is the hypothesis under test.
+        self.honor_signal_levels = honor_signal_levels
 
     def run(
         self,
@@ -290,14 +298,20 @@ class QuickBacktester:
                     notional=self.notional_usd,
                 )
                 entry_idx = i
-            if pos_side == Direction.LONG:
-                stop = entry_price - self.atr_stop_mult * atr
-                target = entry_price + self.atr_target_mult * atr
-            elif pos_side == Direction.SHORT:
-                stop = entry_price + self.atr_stop_mult * atr
-                target = entry_price - self.atr_target_mult * atr
-            else:
+            if pos_side not in (Direction.LONG, Direction.SHORT):
                 continue
+
+            stop, target = self._levels_for(signal, entry_price, pos_side, atr)
+
+            # A structural stop can sit inside the slippage the entry just paid.
+            # Booking an instant stop-out would credit the strategy with a loss
+            # it never had the chance to avoid; skip the trade instead.
+            if (pos_side == Direction.LONG and stop >= entry_price) or (
+                pos_side == Direction.SHORT and stop <= entry_price
+            ):
+                result.unfillable_stops += 1
+                continue
+
             in_pos = True
             bars_held = 0
 
@@ -323,6 +337,51 @@ class QuickBacktester:
 
         result.score = self._score(result)
         return result
+
+    def _levels_for(
+        self,
+        signal,
+        entry_price: float,
+        side: Direction,
+        atr: float,
+    ) -> tuple[float, float]:
+        """Stop and target for a new position.
+
+        With `honor_signal_levels`, a strategy's own stop/target win — which is
+        the only way to evaluate a strategy whose stop placement *is* its edge.
+        Levels are re-anchored to the actual fill so entry slippage does not
+        silently tighten longs and loosen shorts, and each falls back to the ATR
+        multiple when the strategy leaves it unset.
+
+        Without the flag this reproduces the historical behaviour exactly: a
+        uniform ATR trade regardless of what the strategy asked for.
+        """
+        default_stop = (
+            entry_price - self.atr_stop_mult * atr
+            if side == Direction.LONG
+            else entry_price + self.atr_stop_mult * atr
+        )
+        default_target = (
+            entry_price + self.atr_target_mult * atr
+            if side == Direction.LONG
+            else entry_price - self.atr_target_mult * atr
+        )
+
+        if not self.honor_signal_levels:
+            return default_stop, default_target
+
+        reference = signal.entry_price or entry_price
+        shift = entry_price - reference
+
+        stop = default_stop
+        if signal.stop_loss:
+            stop = signal.stop_loss + shift
+
+        target = default_target
+        if signal.take_profit:
+            target = signal.take_profit + shift
+
+        return stop, target
 
     @staticmethod
     def _bar_volume_usd(volumes, closes, i: int) -> Optional[float]:
