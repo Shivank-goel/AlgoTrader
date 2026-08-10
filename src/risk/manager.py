@@ -99,7 +99,9 @@ class RiskManager:
         for pos in positions:
             if pos.stop_loss and pos.entry_price:
                 risk_per_unit = abs(pos.entry_price - pos.stop_loss)
-                total_risk += risk_per_unit * pos.size
+                # underlying_size: `size` is a contract count in live mode, so
+                # using it directly inflated heat by 1/contract_value.
+                total_risk += risk_per_unit * pos.underlying_size
         return (total_risk / equity) * 100
 
     def _is_correlated_exposure(

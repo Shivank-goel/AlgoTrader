@@ -103,6 +103,11 @@ class Order(BaseModel):
     # (e.g. a close retried after the exchange still reported the position open)
     # would otherwise be read as an entry and open a phantom opposite position.
     is_exit: bool = False
+    # Underlying units per contract. `size` means coins in paper mode
+    # (contract_value 1.0) but integer CONTRACTS once the exchange has
+    # normalised the order, and a Delta BTC contract is 0.001 BTC. P&L must
+    # multiply by this or it overstates by 1/contract_value.
+    contract_value: float = 1.0
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -119,6 +124,13 @@ class Position(BaseModel):
     leverage: float = 1.0
     strategy_name: Optional[str] = None
     opened_at: datetime = Field(default_factory=datetime.utcnow)
+    # See Order.contract_value. 1.0 in paper mode, where size is a coin amount.
+    contract_value: float = 1.0
+
+    @property
+    def underlying_size(self) -> float:
+        """Position size in units of the underlying asset."""
+        return self.size * self.contract_value
 
 
 class TradeRecord(BaseModel):

@@ -16,6 +16,19 @@ stops:
   default_atr_multiplier: 2.0
   trailing_stop_enabled: true
 
+# Consumed by both the backtester and paper-mode execution, so simulated and
+# backtested fills are priced identically. Delta Exchange India, 2026-08.
+costs:
+  taker_fee_bps: 5.9          # 0.05% x 1.18 GST
+  maker_fee_bps: 2.36         # 0.02% x 1.18 GST
+  base_slippage_bps: 2.0      # floor, even for tiny orders in deep books
+  impact_coef_bps: 5000.0     # bps per unit of (order notional / bar volume USD)
+  vol_coef: 0.05              # widens with ATR — matters on thin symbols
+  max_slippage_bps: 50.0
+  funding_hours_utc: [0, 8, 16]   # 05:30 / 13:30 / 21:30 IST
+  funding_bps_per_period: 1.0     # ~0.01% per 8h; sweep {0, 1, 3} for sensitivity
+  max_funding_bps_per_period: 100.0
+
 circuit_breaker:
   daily_loss_halt: true
   max_drawdown_close_all: true

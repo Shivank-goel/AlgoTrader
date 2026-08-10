@@ -40,6 +40,10 @@ class FillEvent:
     order: Order
     fill_price: float
     fill_size: float
+    # Execution fee for this fill, in USD. TradeRecord.fees has always existed
+    # and been persisted, but nothing ever populated it, so every recorded
+    # trade looked free.
+    fee_usd: float = 0.0
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
 

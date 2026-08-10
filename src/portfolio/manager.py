@@ -30,6 +30,9 @@ class PortfolioManager:
         self._equity_history: deque[tuple[datetime, float]] = deque(
             maxlen=EQUITY_HISTORY_MAXLEN
         )
+        # Entry fee per open symbol, carried until the position closes so the
+        # round trip can be booked net.
+        self._entry_fees: dict[str, float] = {}
 
     def seed_equity_from_exchange(self, balance: float) -> None:
         """Sync equity from exchange balance. On first call, also sets peak."""
@@ -51,27 +54,52 @@ class PortfolioManager:
     def positions(self) -> list[Position]:
         return list(self._positions.values())
 
-    def open_position(self, position: Position) -> None:
+    def open_position(self, position: Position, entry_fee: float = 0.0) -> None:
         self._positions[position.symbol] = position
+        self._entry_fees[position.symbol] = entry_fee
         logger.info(
-            "Opened %s %s: %.4f @ %.2f",
+            "Opened %s %s: %.4f @ %.2f (entry fee $%.4f)",
             position.side.value,
             position.symbol,
             position.size,
             position.entry_price,
+            entry_fee,
         )
 
-    def close_position(self, symbol: str, exit_price: float) -> Optional[TradeRecord]:
+    def close_position(
+        self,
+        symbol: str,
+        exit_price: float,
+        *,
+        exit_fee: float = 0.0,
+        funding: float = 0.0,
+        exit_reason: str = "signal",
+    ) -> Optional[TradeRecord]:
+        """Close a position and book net P&L.
+
+        Fees and funding are subtracted here rather than being reported
+        alongside a gross number, because every downstream consumer — the
+        circuit breaker's loss counter, the performance scorer, the equity
+        curve — should be reasoning about money actually kept.
+        """
         pos = self._positions.pop(symbol, None)
         if not pos:
             return None
 
-        if pos.side == Direction.LONG:
-            pnl = (exit_price - pos.entry_price) * pos.size
-        else:
-            pnl = (pos.entry_price - exit_price) * pos.size
+        entry_fee = self._entry_fees.pop(symbol, 0.0)
+        total_fees = entry_fee + exit_fee
 
-        pnl_pct = (pnl / (pos.entry_price * pos.size)) * 100 if pos.entry_price else 0
+        # underlying_size, not size: in live mode `size` is a contract count.
+        qty = pos.underlying_size
+        if pos.side == Direction.LONG:
+            gross_pnl = (exit_price - pos.entry_price) * qty
+        else:
+            gross_pnl = (pos.entry_price - exit_price) * qty
+
+        pnl = gross_pnl - total_fees - funding
+
+        notional = pos.entry_price * qty
+        pnl_pct = (pnl / notional) * 100 if notional else 0.0
         self.equity += pnl
         self._realized_pnl_today += pnl
         self.available_balance = self.equity
@@ -86,9 +114,10 @@ class PortfolioManager:
             size=pos.size,
             pnl=pnl,
             pnl_pct=pnl_pct,
+            fees=total_fees + funding,
             entry_time=pos.opened_at,
             exit_time=datetime.utcnow(),
-            exit_reason="signal",
+            exit_reason=exit_reason,
         )
         if trade.entry_time and trade.exit_time:
             trade.duration_seconds = int((trade.exit_time - trade.entry_time).total_seconds())
@@ -108,10 +137,11 @@ class PortfolioManager:
         for symbol, pos in self._positions.items():
             if symbol in prices:
                 price = prices[symbol]
+                qty = pos.underlying_size
                 if pos.side == Direction.LONG:
-                    pos.unrealized_pnl = (price - pos.entry_price) * pos.size
+                    pos.unrealized_pnl = (price - pos.entry_price) * qty
                 else:
-                    pos.unrealized_pnl = (pos.entry_price - price) * pos.size
+                    pos.unrealized_pnl = (pos.entry_price - price) * qty
 
     def get_snapshot(self) -> PortfolioSnapshot:
         unrealized = sum(p.unrealized_pnl for p in self._positions.values())

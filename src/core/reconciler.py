@@ -107,6 +107,9 @@ class PositionStateStore:
             "strategy_name": pos.strategy_name,
             "opened_at": pos.opened_at.isoformat() if pos.opened_at else None,
             "unrealized_pnl": pos.unrealized_pnl,
+            # Without this, a position restored after a restart would compute
+            # P&L as though its contract count were a coin quantity.
+            "contract_value": pos.contract_value,
         }
 
     @staticmethod
@@ -127,6 +130,7 @@ class PositionStateStore:
             strategy_name=data.get("strategy_name"),
             opened_at=opened_at,
             unrealized_pnl=float(data.get("unrealized_pnl", 0.0)),
+            contract_value=float(data.get("contract_value", 1.0) or 1.0),
         )
 
 

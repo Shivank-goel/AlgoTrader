@@ -15,6 +15,7 @@ import os
 import yaml
 from dotenv import load_dotenv
 
+from src.backtest.costs import CostModel
 from src.core.events import (
     CircuitBreakerEvent,
     EventBus,
@@ -134,6 +135,9 @@ class TradingEngine:
 
         trading_mode = self.settings.get("trading", {}).get("mode", "live")
         paper_mode = trading_mode == "paper"
+        # One cost model shared by paper execution and the backtester, so a
+        # paper result is comparable to a backtested one.
+        self.cost_model = CostModel.from_config(self.risk_config)
         self.data_manager = DataManager(self.exchange)
         self.regime_detector = RegimeDetector()
         self.market_builder = MarketStateBuilder(regime_detector=self.regime_detector)
@@ -154,7 +158,9 @@ class TradingEngine:
         self.risk_manager = RiskManager(
             self.risk_config, self.position_sizer, self.circuit_breaker
         )
-        self.order_manager = OrderManager(self.exchange, self.event_bus, paper_mode)
+        self.order_manager = OrderManager(
+            self.exchange, self.event_bus, paper_mode, cost_model=self.cost_model
+        )
         self.notifier = TelegramNotifier(
             enabled=self.settings.get("notifications", {}).get("telegram_enabled", False)
         )
@@ -813,7 +819,9 @@ class TradingEngine:
                     stop_loss=order.stop_loss,
                     take_profit=order.take_profit,
                     strategy_name=order.strategy_name,
-                )
+                    contract_value=order.contract_value,
+                ),
+                entry_fee=event.fee_usd,
             )
             self._persist_position_state()
             await self._place_bracket_on_exchange(
@@ -821,7 +829,18 @@ class TradingEngine:
             )
             return
 
-        trade = self.portfolio.close_position(order.symbol, event.fill_price)
+        funding = self.cost_model.funding_usd(
+            notional=existing.entry_price * existing.size,
+            direction=existing.side,
+            entry_ts=existing.opened_at,
+            exit_ts=event.timestamp,
+        )
+        trade = self.portfolio.close_position(
+            order.symbol,
+            event.fill_price,
+            exit_fee=event.fee_usd,
+            funding=funding,
+        )
         self._persist_position_state()
         if trade:
             self.journal.record_trade(trade)
@@ -846,6 +865,7 @@ class TradingEngine:
                     symbol=pos.symbol,
                     direction=pos.side,
                     size=pos.size,
+                    mark_price=self._current_price_for(pos.symbol) or pos.entry_price,
                     strategy_name="circuit_breaker",
                     reason="circuit_breaker",
                 )
@@ -887,6 +907,7 @@ class TradingEngine:
                 symbol=pos.symbol,
                 direction=pos.side,
                 size=pos.size,
+                mark_price=price,
                 strategy_name=pos.strategy_name or "stop_enforcement",
                 reason=exit_reason,
             )
@@ -1038,6 +1059,7 @@ class TradingEngine:
                     symbol=open_pos.symbol,
                     direction=open_pos.side,
                     size=open_pos.size,
+                    mark_price=market_state.price,
                     strategy_name=trading_signal.strategy_name,
                     reason="signal_exit",
                     signal_id=trading_signal.id,

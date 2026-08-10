@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Optional
 
+from src.backtest.costs import CostModel
 from src.core.events import EventBus, FillEvent, OrderEvent
 from src.core.models import (
     Direction,
@@ -42,11 +43,15 @@ class OrderManager:
         event_bus: EventBus,
         paper_mode: bool = True,
         alert_callback: Optional[AlertCallback] = None,
+        cost_model: Optional[CostModel] = None,
     ) -> None:
         self.exchange = exchange
         self.event_bus = event_bus
         self.paper_mode = paper_mode
         self._alert_callback = alert_callback
+        # Paper fills are priced by the same model the backtester uses, so a
+        # paper result can be compared against a backtest at all.
+        self.cost_model = cost_model or CostModel()
         self._orders: dict[str, Order] = {}
         self._halted_symbols: set[str] = set()
 
@@ -90,6 +95,7 @@ class OrderManager:
                 symbol=signal.symbol,
                 direction=signal.direction,
                 size=size,
+                mark_price=signal.entry_price,
                 strategy_name=signal.strategy_name,
                 reason="signal_exit",
                 signal_id=signal.id,
@@ -106,22 +112,42 @@ class OrderManager:
         await self.event_bus.publish(OrderEvent(order=order))
 
         if self.paper_mode:
+            mark_price = order.price or 0.0
+            if mark_price <= 0:
+                # Without a mark there is no honest fill price. Filling at 0.0
+                # is what made paper P&L meaningless; refuse instead.
+                logger.error(
+                    "PAPER order for %s has no usable price — rejecting rather "
+                    "than filling at zero",
+                    order.symbol,
+                )
+                order.status = OrderStatus.REJECTED
+                order.updated_at = datetime.utcnow()
+                return order
+
             order.status = OrderStatus.FILLED
             order.filled_size = order.size
-            order.avg_fill_price = order.price or 0.0
+            order.avg_fill_price = self.cost_model.fill_price_for_side(
+                mark_price, order.side
+            )
             order.updated_at = datetime.utcnow()
+
+            fee = self.cost_model.fee_usd(order.avg_fill_price * order.filled_size)
             logger.info(
-                "PAPER order filled: %s %s %.4f @ %.2f",
+                "PAPER order filled: %s %s %.4f @ %.4f (mark %.4f, fee $%.4f)",
                 order.side.value,
                 order.symbol,
                 order.size,
                 order.avg_fill_price,
+                mark_price,
+                fee,
             )
             await self.event_bus.publish(
                 FillEvent(
                     order=order,
                     fill_price=order.avg_fill_price,
                     fill_size=order.filled_size,
+                    fee_usd=fee,
                 )
             )
             return order
@@ -167,11 +193,15 @@ class OrderManager:
 
             self._log_slippage(order, fill_price, fill_size)
 
+            # Estimated, not authoritative: Delta does not return a per-order fee
+            # on this endpoint. Good enough to keep P&L honest, and it uses the
+            # same schedule as the backtest.
             await self.event_bus.publish(
                 FillEvent(
                     order=order,
                     fill_price=fill_price,
                     fill_size=fill_size,
+                    fee_usd=self.cost_model.fee_usd(fill_price * fill_size),
                 )
             )
             logger.info(
@@ -233,19 +263,80 @@ class OrderManager:
                 requested_price, fill_price,
             )
 
+    async def _publish_reconciled_close(
+        self,
+        *,
+        symbol: str,
+        direction: Direction,
+        size: float,
+        mark_price: Optional[float],
+        strategy_name: str,
+        reason: str,
+        signal_id: Optional[str],
+    ) -> None:
+        """Book a close that happened on the exchange without our order.
+
+        The fill price is the current mark, which is an approximation — the
+        exchange bracket actually filled at its trigger. An approximate trade
+        record is worth far more than a silently discarded one, so this is
+        tagged `<reason>_reconciled` to keep it distinguishable in analysis.
+        """
+        if not mark_price or mark_price <= 0:
+            logger.error(
+                "Cannot book reconciled close for %s — no mark price. The "
+                "position will be dropped without a trade record.",
+                symbol,
+            )
+            return
+
+        order = Order(
+            symbol=symbol,
+            side=OrderSide.SELL if direction == Direction.LONG else OrderSide.BUY,
+            order_type=OrderType.MARKET,
+            size=size,
+            price=mark_price,
+            status=OrderStatus.FILLED,
+            filled_size=size,
+            avg_fill_price=mark_price,
+            signal_id=signal_id,
+            strategy_name=strategy_name,
+            is_exit=True,
+        )
+        self._orders[order.id] = order
+
+        logger.info(
+            "Booking reconciled close for %s at mark %.4f (%s) — position was "
+            "already flat on the exchange",
+            symbol, mark_price, reason,
+        )
+        await self.event_bus.publish(
+            FillEvent(
+                order=order,
+                fill_price=mark_price,
+                fill_size=size,
+                fee_usd=self.cost_model.fee_usd(mark_price * size),
+            )
+        )
+
     async def close_position_verified(
         self,
         symbol: str,
         direction: Direction,
         size: float,
         *,
+        mark_price: Optional[float] = None,
         strategy_name: str = "manual",
         reason: str = "exit",
         signal_id: Optional[str] = None,
         max_retries: int = DEFAULT_CLOSE_MAX_RETRIES,
         base_interval: float = DEFAULT_CLOSE_BASE_INTERVAL,
     ) -> Optional[Order]:
-        """Close a position with retries; verify flat on the exchange before returning."""
+        """Close a position with retries; verify flat on the exchange before returning.
+
+        `mark_price` is required in paper mode — it is the reference the
+        simulated fill is priced from. Live mode ignores it; the exchange
+        reports the real fill.
+        """
         symbol = symbol.upper()
         last_order: Optional[Order] = None
         last_error: Optional[Exception] = None
@@ -256,24 +347,50 @@ class OrderManager:
                 side=OrderSide.SELL if direction == Direction.LONG else OrderSide.BUY,
                 order_type=OrderType.MARKET,
                 size=size,
+                price=mark_price,
                 signal_id=signal_id,
                 strategy_name=strategy_name,
                 is_exit=True,
             )
             self._orders[order.id] = order
             await self.event_bus.publish(OrderEvent(order=order))
+
+            if not mark_price or mark_price <= 0:
+                # This is the bug that made every paper close book a loss of
+                # 100% of notional: the Order was constructed without a price,
+                # so `order.price or 0.0` filled at zero and the engine closed
+                # the position at 0.0.
+                logger.error(
+                    "PAPER close for %s has no mark price — refusing to fill at "
+                    "zero (position left open)",
+                    symbol,
+                )
+                order.status = OrderStatus.REJECTED
+                order.updated_at = datetime.utcnow()
+                raise PositionCloseError(symbol, "no mark price supplied", 0)
+
             order.status = OrderStatus.FILLED
             order.filled_size = size
-            order.avg_fill_price = order.price or 0.0
+            order.avg_fill_price = self.cost_model.exit_fill_price(mark_price, direction)
             order.updated_at = datetime.utcnow()
+
+            fee = self.cost_model.fee_usd(order.avg_fill_price * size)
+            logger.info(
+                "PAPER close filled: %s %s %.4f @ %.4f (mark %.4f, fee $%.4f, %s)",
+                order.side.value, symbol, size, order.avg_fill_price,
+                mark_price, fee, reason,
+            )
             await self.event_bus.publish(
                 FillEvent(
                     order=order,
                     fill_price=order.avg_fill_price,
                     fill_size=order.filled_size,
+                    fee_usd=fee,
                 )
             )
             return order
+
+        published_fill = False
 
         for attempt in range(max_retries):
             try:
@@ -285,6 +402,23 @@ class OrderManager:
                         attempt + 1,
                         max_retries,
                     )
+                    if not published_fill:
+                        # The position closed without us placing the order that
+                        # closed it — almost always an exchange-side bracket
+                        # fill. Returning here silently was one of two reasons
+                        # the trades table stayed empty: no FillEvent means the
+                        # engine never books the close, so the local position is
+                        # dropped with no TradeRecord, no P&L and no input to
+                        # the performance scorer.
+                        await self._publish_reconciled_close(
+                            symbol=symbol,
+                            direction=direction,
+                            size=size,
+                            mark_price=mark_price,
+                            strategy_name=strategy_name,
+                            reason=reason,
+                            signal_id=signal_id,
+                        )
                     return last_order
 
                 exit_order = Order(
@@ -305,6 +439,7 @@ class OrderManager:
 
                 if resolved.status == OrderStatus.FILLED:
                     last_order = await self._reconcile_and_publish(resolved)
+                    published_fill = True
                 elif resolved.status in (OrderStatus.CANCELLED, OrderStatus.REJECTED):
                     logger.warning(
                         "Close order %s for %s ended as %s; verifying exchange position",

@@ -506,14 +506,21 @@ class DeltaExchangeClient:
         order: Order,
         raw: dict[str, Any],
         contracts: float,
+        contract_value: float = 1.0,
     ) -> Order:
         """Map a terminal exchange order payload onto the local Order model.
 
         Handles full fills, partial fills, and cancellations distinctly.
+
+        Note the unit change: `order.size` arrives as a coin quantity from
+        PositionSizer and leaves as an integer CONTRACT count. `contract_value`
+        records the conversion so downstream P&L can recover the underlying
+        amount instead of treating contracts as coins.
         """
         state = _exchange_order_state(raw)
         order.exchange_order_id = str(raw.get("id", order.exchange_order_id or ""))
         order.size = float(contracts)
+        order.contract_value = float(contract_value) if contract_value else 1.0
         order.updated_at = datetime.utcnow()
 
         avg = raw.get("average_fill_price") or raw.get("avg_fill_price")
@@ -805,7 +812,12 @@ class DeltaExchangeClient:
                 symbol=order.symbol,
             )
 
-        return self._apply_exchange_order_to_order(order, result, float(contracts))
+        return self._apply_exchange_order_to_order(
+            order,
+            result,
+            float(contracts),
+            contract_value=float(product.get("contract_value", 1) or 1),
+        )
 
     async def cancel_order(self, order_id: str) -> bool:
         """Cancel and verify the order is actually cancelled on the exchange."""
