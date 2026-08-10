@@ -27,5 +27,7 @@ circuit_breaker:
   state_file: data/circuit_breaker_state.json
   audit_file: logs/circuit_breaker_audit.log
 
+# Venue symbols are BTCUSD/ETHUSD (not ...USDT) — the previous USDT spelling
+# meant RiskManager._is_correlated_exposure never matched an open position.
 correlation_groups:
-  - [BTCUSDT, ETHUSDT]
+  - [BTCUSD, ETHUSD]

@@ -258,6 +258,7 @@ class OrderManager:
                 size=size,
                 signal_id=signal_id,
                 strategy_name=strategy_name,
+                is_exit=True,
             )
             self._orders[order.id] = order
             await self.event_bus.publish(OrderEvent(order=order))
@@ -293,6 +294,7 @@ class OrderManager:
                     size=size,
                     signal_id=signal_id,
                     strategy_name=strategy_name,
+                    is_exit=True,
                 )
                 self._orders[exit_order.id] = exit_order
                 await self.event_bus.publish(OrderEvent(order=exit_order))

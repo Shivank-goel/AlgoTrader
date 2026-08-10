@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from datetime import datetime
 from typing import Optional
 
 from src.core.models import Direction, PortfolioSnapshot, Position, Regime, TradeRecord
 
 logger = logging.getLogger(__name__)
+
+# get_snapshot() appends on every scan *and* every dashboard poll, so an
+# unbounded list grew for the life of the process. ~1 week at a 30s cadence.
+EQUITY_HISTORY_MAXLEN = 20_000
 
 
 class PortfolioManager:
@@ -22,7 +27,9 @@ class PortfolioManager:
         self._peak_equity = initial_equity
         self._peak_equity_initialized = False
         self._realized_pnl_today = 0.0
-        self._equity_history: list[tuple[datetime, float]] = []
+        self._equity_history: deque[tuple[datetime, float]] = deque(
+            maxlen=EQUITY_HISTORY_MAXLEN
+        )
 
     def seed_equity_from_exchange(self, balance: float) -> None:
         """Sync equity from exchange balance. On first call, also sets peak."""
@@ -135,4 +142,4 @@ class PortfolioManager:
         self._realized_pnl_today = 0.0
 
     def get_equity_history(self) -> list[tuple[datetime, float]]:
-        return self._equity_history
+        return list(self._equity_history)

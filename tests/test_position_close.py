@@ -51,11 +51,17 @@ async def test_close_retries_until_exchange_position_is_flat(
 
     event_bus = EventBus()
     fills: list[FillEvent] = []
-    fill_done = asyncio.Event()
+    # Two exit orders are placed here (the exchange reports the position still
+    # open after the first), and both fill — so two FillEvents are expected.
+    # Waiting on a single-shot Event raced: whether the second had been
+    # dispatched by assertion time was luck.
+    expected_fills = 2
+    all_fills_done = asyncio.Event()
 
     async def on_fill(event: FillEvent) -> None:
         fills.append(event)
-        fill_done.set()
+        if len(fills) >= expected_fills:
+            all_fills_done.set()
 
     event_bus.subscribe(FillEvent, on_fill)
     await event_bus.start()
@@ -74,14 +80,18 @@ async def test_close_retries_until_exchange_position_is_flat(
                         max_retries=4,
                         base_interval=0.01,
                     )
-                    await asyncio.wait_for(fill_done.wait(), timeout=1.0)
+                    await asyncio.wait_for(all_fills_done.wait(), timeout=1.0)
     finally:
         await event_bus.stop()
 
     assert close_attempts == 2
     assert result is not None
     assert result.status == OrderStatus.FILLED
-    assert len(fills) == 1
+    assert len(fills) == expected_fills
+    # Every exit fill must be marked as such, so the engine's fill handler can
+    # discard the duplicate instead of opening a phantom opposite position.
+    assert all(f.order.is_exit for f in fills)
+    assert all(f.fill_price > 0 for f in fills)
 
 
 @pytest.mark.asyncio

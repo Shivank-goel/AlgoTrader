@@ -21,6 +21,32 @@ DASHBOARD_DIR = Path(__file__).parent
 _products_cache: dict[str, Any] = {"data": [], "fetched_at": 0.0}
 PRODUCTS_CACHE_TTL = 60
 
+# Read-only endpoints used to call engine.sync_exchange_state() on every poll.
+# With a 5s browser refresh that hammered the exchange and, during an outage,
+# drove TradingEngine._consecutive_sync_failures up by ~12/min per open tab.
+_last_dashboard_sync: dict[str, float] = {"at": 0.0}
+DASHBOARD_SYNC_MIN_INTERVAL = 30.0
+
+
+async def _maybe_sync(engine: Any) -> None:
+    """Refresh exchange state for read-only endpoints, throttled and never fatal.
+
+    No-op while the engine loop is running — run_loop already syncs on its own
+    cadence, so the dashboard should just read what it published.
+    """
+    if engine is None or getattr(engine, "_running", False):
+        return
+
+    now = time.monotonic()
+    if now - _last_dashboard_sync["at"] < DASHBOARD_SYNC_MIN_INTERVAL:
+        return
+    _last_dashboard_sync["at"] = now
+
+    try:
+        await engine.sync_exchange_state()
+    except Exception:
+        logger.debug("Dashboard sync failed", exc_info=True)
+
 
 class PairRequest(BaseModel):
     symbol: str
@@ -243,10 +269,7 @@ def create_app(engine: Optional[Any] = None) -> FastAPI:
         if engine is None:
             return {"status": "offline", "timestamp": datetime.utcnow().isoformat()}
 
-        try:
-            await engine.sync_exchange_state()
-        except Exception:
-            logger.debug("Status sync failed", exc_info=True)
+        await _maybe_sync(engine)
 
         portfolio = engine.portfolio.get_snapshot()
         hb = engine.get_heartbeat()
@@ -275,10 +298,7 @@ def create_app(engine: Optional[Any] = None) -> FastAPI:
     async def positions():
         if engine is None:
             return {"count": 0, "positions": []}
-        try:
-            await engine.sync_exchange_state()
-        except Exception:
-            logger.debug("Position sync failed", exc_info=True)
+        await _maybe_sync(engine)
         pos_list = _positions_payload(engine)
         return {"count": len(pos_list), "positions": pos_list}
 

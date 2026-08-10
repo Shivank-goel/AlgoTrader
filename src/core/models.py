@@ -98,6 +98,11 @@ class Order(BaseModel):
     avg_fill_price: Optional[float] = None
     signal_id: Optional[str] = None
     strategy_name: Optional[str] = None
+    # True for orders that close an existing position. Fill handling must never
+    # infer intent from "is there a local position?" — a duplicate exit fill
+    # (e.g. a close retried after the exchange still reported the position open)
+    # would otherwise be read as an entry and open a phantom opposite position.
+    is_exit: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

@@ -35,7 +35,9 @@ def risk_config(tmp_path):
             "state_file": str(tmp_path / "cb_state.json"),
             "audit_file": str(tmp_path / "cb_audit.log"),
         },
-        "correlation_groups": [["BTCUSDT", "ETHUSDT"]],
+        # Venue symbols are BTCUSD/ETHUSD. The config (and this fixture) used to
+        # say BTCUSDT/ETHUSDT, so the correlation check never matched anything.
+        "correlation_groups": [["BTCUSD", "ETHUSD"]],
     }
 
 
@@ -117,6 +119,39 @@ def test_validate_signal_requires_stop_loss(risk_config, portfolio):
     valid, reason = rm.validate_signal(signal, portfolio)
     assert valid is False
     assert "Stop-loss" in reason
+
+
+def test_correlated_exposure_blocks_second_leg(risk_config, portfolio):
+    """An open BTCUSD position blocks a correlated ETHUSD entry.
+
+    Regression: the correlation group listed BTCUSDT/ETHUSDT, which are not
+    symbols this venue trades, so the gate never fired.
+    """
+    event_bus = EventBus()
+    cb = CircuitBreaker(risk_config, event_bus)
+    rm = RiskManager(risk_config, PositionSizer(risk_config), cb)
+
+    portfolio.open_positions = [
+        Position(
+            symbol="BTCUSD",
+            side=Direction.LONG,
+            entry_price=50000,
+            size=0.01,
+            stop_loss=49000,
+        )
+    ]
+    signal = Signal(
+        symbol="ETHUSD",
+        direction=Direction.LONG,
+        strategy_name="test",
+        confidence=0.8,
+        entry_price=3000,
+        stop_loss=2900,
+    )
+
+    assert rm._is_correlated_exposure("ETHUSD", portfolio) is True
+    # An uncorrelated symbol is still allowed through.
+    assert rm._is_correlated_exposure("SOLUSD", portfolio) is False
 
 
 def test_position_size_uses_available_balance_not_total_equity(risk_config):

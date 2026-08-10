@@ -772,7 +772,29 @@ class TradingEngine:
 
     async def _on_fill(self, event: FillEvent) -> None:
         order = event.order
+
+        # A fill price of zero means the fill was synthesised without a mark
+        # price. Acting on it books a -100%-of-notional trade, so refuse it
+        # rather than corrupting portfolio state.
+        if event.fill_price is None or event.fill_price <= 0:
+            logger.error(
+                "Ignoring fill for %s with non-positive price %r (order=%s)",
+                order.symbol,
+                event.fill_price,
+                order.id,
+            )
+            return
+
         existing = self.portfolio._positions.get(order.symbol)
+
+        if existing is None and order.is_exit:
+            # Duplicate/late exit fill — the position is already closed. Opening
+            # a new one here would create a phantom position facing the wrong way.
+            logger.warning(
+                "Ignoring exit fill for %s — no open position (already closed)",
+                order.symbol,
+            )
+            return
 
         if existing is None:
             if self.circuit_breaker.is_halted:
@@ -1224,7 +1246,12 @@ class TradingEngine:
                 max_sync_failures,
                 exc_info=True,
             )
-            if self._consecutive_sync_failures >= max_sync_failures:
+            # Halt once, on the threshold *crossing* only. Previously this fired on
+            # every failure past the threshold, rewriting the state file, appending to
+            # the audit log and re-alerting each time — 3034 halts and a 2 MB audit
+            # log accumulated from a single outage.
+            crossed_threshold = self._consecutive_sync_failures == max_sync_failures
+            if crossed_threshold and not self.circuit_breaker.is_halted:
                 message = (
                     f"Exchange sync failed {self._consecutive_sync_failures} times "
                     f"consecutively — halting via circuit breaker"

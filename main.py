@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 import click
@@ -15,15 +16,41 @@ from rich.table import Table
 
 console = Console()
 
+DEFAULT_LOG_FILE = "logs/trader.log"
+DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024
+DEFAULT_LOG_BACKUP_COUNT = 5
 
-def setup_logging(level: str = "INFO") -> None:
-    Path("logs").mkdir(exist_ok=True)
+
+def _load_logging_config(config_dir: str) -> dict:
+    """Read the `logging:` block from settings.yaml, tolerating a missing file."""
+    try:
+        with open(Path(config_dir) / "settings.yaml") as fh:
+            return (yaml.safe_load(fh) or {}).get("logging", {}) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
+def setup_logging(config_dir: str = "config") -> None:
+    """Configure console + size-rotated file logging from settings.yaml.
+
+    The rotation settings have always been present in config/settings.yaml but
+    were never read, so logs/trader.log grew unbounded (343 MB when found).
+    """
+    cfg = _load_logging_config(config_dir)
+    level = str(cfg.get("level", "INFO"))
+    log_file = Path(cfg.get("file", DEFAULT_LOG_FILE))
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler("logs/trader.log"),
+            RotatingFileHandler(
+                log_file,
+                maxBytes=int(cfg.get("max_bytes", DEFAULT_LOG_MAX_BYTES)),
+                backupCount=int(cfg.get("backup_count", DEFAULT_LOG_BACKUP_COUNT)),
+            ),
         ],
     )
 
@@ -35,7 +62,7 @@ def cli(ctx, config):
     """Adaptive Crypto Trading System for Delta Exchange India."""
     ctx.ensure_object(dict)
     ctx.obj["config"] = config
-    setup_logging()
+    setup_logging(config)
 
 
 @cli.command()
@@ -130,7 +157,7 @@ def status(ctx):
 
 
 @cli.command()
-@click.option("--symbol", default="BTCUSDT")
+@click.option("--symbol", default="BTCUSD")
 @click.option("--start", default="2026-01-01")
 @click.option("--end", default="2026-06-30")
 @click.pass_context
@@ -142,7 +169,7 @@ def backtest(ctx, symbol, start, end):
 
 
 @cli.command()
-@click.option("--symbol", default="BTCUSDT")
+@click.option("--symbol", default="BTCUSD")
 @click.option("--is-window", default=90, type=int)
 @click.option("--oos-window", default=30, type=int)
 @click.pass_context

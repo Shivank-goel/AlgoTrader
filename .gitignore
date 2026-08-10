@@ -10,6 +10,7 @@ __pycache__/
 dist/
 build/
 .venv/
+.venv312/
 venv/
 
 # Data & logs
@@ -18,9 +19,10 @@ logs/
 *.db
 *.parquet
 
-# IDE
+# IDE / local agent config
 .idea/
 .vscode/
+.claude/settings.local.json
 *.swp
 .DS_Store
 
