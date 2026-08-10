@@ -179,6 +179,58 @@ def optimize(ctx, symbol, is_window, oos_window):
     console.print("Use: python scripts/optimize.py --symbol BTCUSDT")
 
 
+@cli.command("news")
+@click.option("--once", is_flag=True, help="Poll a single time and exit")
+@click.option("--interval", default=900, type=int, help="Seconds between polls")
+@click.option("--stats", is_flag=True, help="Show what has been collected and exit")
+@click.pass_context
+def news(ctx, once, interval, stats):
+    """Collect crypto headlines into data/trades.db.
+
+    Runs independently of the trading engine. Start it early: no free source
+    backfills history, so the training set only accumulates from first run.
+    """
+    from src.news.poller import NewsPoller
+    from src.news.store import NewsStore
+
+    if stats:
+        store = NewsStore()
+        by_source = store.stats()
+        by_asset = store.asset_stats()
+
+        table = Table(title="Collected News")
+        table.add_column("Bucket", style="cyan")
+        table.add_column("Items", style="green", justify="right")
+        table.add_row("TOTAL", str(by_source.pop("total", 0)))
+        for name, count in by_source.items():
+            table.add_row(f"source: {name}", str(count))
+        for asset, count in by_asset.items():
+            table.add_row(f"asset: {asset}", str(count))
+        console.print(table)
+        return
+
+    poller = NewsPoller(interval_seconds=interval)
+    source_names = ", ".join(s.name for s in poller.sources)
+    console.print(f"[bold green]News poller[/bold green] sources: {source_names}")
+
+    async def main():
+        import aiohttp
+
+        if once:
+            async with aiohttp.ClientSession() as session:
+                inserted = await poller.poll_once(session)
+            console.print(f"[green]{inserted} new item(s) stored[/green]")
+            return
+
+        console.print(f"[dim]Polling every {interval}s — Ctrl-C to stop[/dim]")
+        await poller.run()
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]News poller stopped[/yellow]")
+
+
 @cli.command()
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 @click.pass_context
