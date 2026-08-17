@@ -231,6 +231,89 @@ not liquidity. Cross-sectional strategies are the most promising family found,
 and they are precisely the family most starved by a four-name cross-section. The
 published results this approach is based on use hundreds of coins.
 
+---
+
+# Round 3 — NSE cash equity
+
+**Date:** 2026-08-17. Universe: 208 F&O-eligible NSE names from Dhan's public instrument
+master, 196 surviving a 90% coverage filter. Panel: **196 names × 1,085 sessions**
+(2021-11-18 → 2026-08-17). Prices split/dividend adjusted. Costs: measured Dhan intraday
+(₹10.60 per ₹10,000 round trip = 10.60 bps).
+
+The move was made for one reason: Delta India offered a **4-name** cross-section. NSE offers
+**196**, a 49× increase in the input that every cross-sectional result was starved of.
+
+## A contaminated result, caught
+
+The first sweep produced overnight-gap reversal at **Sharpe 6.48, t = 13.41, +173.8% net**.
+That is not a plausible edge in liquid equities, and it wasn't one.
+
+The signal was `O_t / C_{t-1} − 1` and the return was `C_t / O_t − 1`. **Both contain the
+same open price.** Any noise in `O_t` — bid-ask bounce, a stale print, adjustment rounding —
+makes a name look like a bigger loser *and* gives it a higher open-to-close return.
+Mechanical, not economic.
+
+The tell was visible before the diagnosis: the close-to-close signal, which shares no price
+with the return, showed **1.4 bps at t = 0.45**, while only the gap variant exploded.
+
+Removing the shared price:
+
+| Signal → return | Shared price? | Result |
+|---|---|---|
+| gap → same-session `O_t→C_t` | **yes** | 55.3 bps/day, t = 18.10 |
+| gap → next-session `C_t→C_{t+1}` | no | −6.1 bps/day, t = −2.02 |
+| gap → next-session `O_{t+1}→C_{t+1}` | no | **18.0 bps/day, t = 6.87** |
+
+A real signal survives, roughly a third the apparent size. The sign pattern is coherent with
+the published overnight-reversal / intraday-continuation decomposition: gapped-down names
+rise during subsequent sessions and drift back overnight.
+
+## Result: overnight-gap intraday reversal — FAILS on cost, not on signal
+
+Clean specification (signal at day *t*, hold `O_{t+1}→C_{t+1}`), market-neutral, 1,082
+sessions:
+
+| Legs | Gross bps/day | t | Turnover | Fees bps/day | Net before spread | Break-even spread |
+|---|---|---|---|---|---|---|
+| 10 | 9.95 | 5.53 | 1.77 | 9.37 | **0.59** | 0.66 bps |
+| 20 | 8.96 | **6.82** | 1.65 | 8.77 | **0.19** | 0.23 bps |
+| 30 | 7.30 | 6.64 | 1.56 | 8.25 | −0.95 | — |
+
+**The signal is statistically strong and economically absent.** Fees consume 98% of it. The
+strategy must execute inside a 0.23 bps effective spread; the tightest NSE large-cap quotes
+are several bps, and Corwin–Schultz on the selected names estimates ~68.7 bps (biased high
+for gappy names, but not by two orders of magnitude).
+
+Turnover cannot be cut: the extreme gappers are different names every day, so the
+`rebalance_band` never binds — verified, results identical across bands 0.0/0.5/1.0.
+
+## The finding that actually matters: this edge has a capital threshold
+
+NSE fees are **not scale-invariant**. Dhan charges `min(₹20, 0.03%)` per order, so above
+₹66,667 per order the effective rate falls. With a 40-name book:
+
+| Capital (4× MIS) | Per-order | RT fee | Net bps/day | Break-even spread | |
+|---|---|---|---|---|---|
+| ₹10,000 | ₹1,000 | 10.60 | 0.21 | 0.26 bps | dead |
+| ₹1,00,000 | ₹10,000 | 10.60 | 0.21 | 0.26 bps | dead |
+| ₹10,00,000 | ₹1,00,000 | 8.24 | 2.16 | 2.62 bps | marginal |
+| ₹30,00,000 | ₹3,00,000 | 5.10 | 4.75 | 5.76 bps | **viable** |
+
+**The strategy is not unprofitable — it is unprofitable at this account size.** The same
+signal, same code, same costs becomes tradeable somewhere around ₹10–30 lakh, because that
+is where per-order notional clears the brokerage cap. Below it, fees are a flat 0.03% and
+there is nothing to be done.
+
+This is the first time in three rounds that "no edge" has resolved into "edge above ₹X".
+
+## Method note
+
+`NSEEquityCostModel.half_spread_bps` defaults to **0**, so the fee arithmetic stays exactly
+auditable against Dhan's calculator. A strategy evaluated at zero spread is being handed free
+execution, so results are reported as a **break-even spread** instead of assuming one —
+`breakeven_half_spread_bps()`. Resolving whether a given spread is achievable needs real
+quote data, which daily OHLC cannot supply.
+
 ## Reproducing
 
 ```bash

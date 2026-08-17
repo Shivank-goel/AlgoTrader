@@ -31,3 +31,5 @@ logs/
 .coverage
 htmlcov/
 data/trials.json
+data/nse/scrip_master.csv
+data/nse/hist/
