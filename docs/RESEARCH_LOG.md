@@ -162,6 +162,64 @@ search.
 | Priority | Item | Refs |
 |---|---|---|
 | 1 | Obtain a **survivorship-free NSE universe** | K-90 |
-| 2 | Test whether R-09's signal survives at **weekly** turnover — testable today, no new data | K-93 |
+| 2 | ~~Test whether R-09's signal survives at weekly turnover~~ — **answered by R-11: no, and it cannot be** | K-93 |
 | 3 | One live ₹500 round trip to settle the per-order minimum fee | K-92 |
 | 4 | Research agent (propose → backtest → pass mark → registry). **Deliberately deferred**: pointing an automated search at survivorship-biased data generates confident nonsense faster. | K-90 |
+
+## R-11 — Does the overnight-gap signal survive at lower turnover?
+2026-08-17 · **FAIL — and it cannot be made to** · Uses: K-44, K-25 · Changes: K-28, K-29, K-44, K-46, **K-78**, **K-79**
+
+**Method** Two tests. First the decay profile: rank on the gap at session *t*, measure the
+open-to-close return at *t+h* for h = 1…8 (never sharing a price). Then the economic version:
+hold from `O_{t+1}` to `C_{t+H}`, rebalancing every H sessions.
+
+**Result — decay** The signal is far more persistent than expected. It still predicts intraday
+returns **eight sessions later**, significant at every horizon:
+
+```
+t+1 17.92 bps (t=6.82)   t+3  9.61 (4.27)   t+5 12.31 (5.64)   t+7 8.99 (4.00)
+t+2 11.48 bps (t=4.88)   t+4  5.81 (2.74)   t+6  7.02 (3.32)   t+8 5.07 (2.32)
+```
+
+**Result — multi-day holds** The opposite. Gross per rebalance is ~8 bps at H=1, 7.60 at H=2,
+7.93 at H=3, **−2.12 at H=5**. Holding longer does not accumulate the per-horizon edge.
+
+**Why both are true** The edge is purely *intraday*. Holding through a session captures the
+open-to-close move, but the overnight legs reverse it — R-09 already measured close-to-close
+at −6.1 bps/day. So the signal predicts each day's intraday move, and carrying gives the
+profit back overnight.
+
+**Two bugs found in the process, both flattering**
+
+1. **K-78** — the backtester charged only `book - held`, so a name that stayed in the book
+   cost nothing to hold. That is correct for a positional strategy carrying inventory and
+   wrong under MIS, which forbids carrying: a kept name is still sold at the close and
+   rebought at the next open. The code's own comment claimed it charged for re-establishing;
+   it did not. Fixed with `squares_off_daily=True`.
+2. **K-79** — the strategy class still had the K-71 contamination baked in: `OVERNIGHT_GAP`
+   used *this* session's open, sharing `O_i` with the return. The diagnosis had been applied
+   to the analysis script but never to the class the backtester runs. Signal now lags one
+   session.
+
+**Corrected result** Clean signal, honest cost:
+
+```
+legs  gross bps/d   cost bps/d   net bps/d      t
+  10        10.06        10.60       -0.54  -0.31
+  20         9.02        10.60       -1.58  -1.21
+  30         7.36        10.60       -3.24  -2.96
+```
+
+**Verdict** Answers K-93 definitively: **no**. Turnover cannot be reduced, because the cost is
+not a turnover cost — it is a floor of one full round trip per session that MIS imposes
+regardless of what the book does (K-28). Rebalance bands, slower signals and longer holds all
+fail for the same structural reason.
+
+The capital threshold in K-46 survives but moves up: break-even is now **~₹5 lakh** rather
+than ₹10 lakh, and that is still before any bid-ask spread (K-26).
+
+**Consequence for the plan** All three structures available at ₹10,000 are now closed:
+positional long/short is impossible (K-12), intraday long/short is below its cost floor
+(K-28), and long-only positional cannot be measured on survivorship-biased data (K-80).
+**K-90 is no longer merely the highest-value open item — it is the only one that can unblock
+anything at this account size.**

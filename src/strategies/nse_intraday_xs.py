@@ -80,11 +80,10 @@ class IntradayCrossSectional:
     def raw_signal(
         self, opens: pd.DataFrame, closes: pd.DataFrame, i: int
     ) -> Optional[pd.Series]:
-        """Cross-sectional score at session `i`, using only information
-        available before that session's open.
+        """Cross-sectional score at session `i`.
 
-        The overnight-gap variant is the one place today's open is used, which
-        is legitimate: the open is observable before the entry it triggers.
+        Every variant uses only prices from sessions strictly before `i`, so no
+        price ever appears in both the signal and the return the book earns.
         """
         if i < self.min_history():
             return None
@@ -92,7 +91,16 @@ class IntradayCrossSectional:
         if self.signal is Signal.PREV_CLOSE_TO_CLOSE:
             score = closes.iloc[i - 1] / closes.iloc[i - 2] - 1.0
         elif self.signal is Signal.OVERNIGHT_GAP:
-            score = opens.iloc[i] / closes.iloc[i - 1] - 1.0
+            # The gap of the PREVIOUS session, not this one.
+            #
+            # Using this session's gap (O_i / C_{i-1}) shares the price O_i with
+            # the O_i -> C_i return the book earns, so noise in that single
+            # print makes a name look like a bigger loser AND gives it a higher
+            # return. That is mechanical, not economic, and it inflated an
+            # earlier version of this strategy to Sharpe 6.48 (see K-71).
+            # Lagging by one session removes the shared price entirely; the
+            # signal survives at about a third the apparent size.
+            score = opens.iloc[i - 1] / closes.iloc[i - 2] - 1.0
         else:  # MULTI_DAY
             score = closes.iloc[i - 1] / closes.iloc[i - 1 - self.formation_days] - 1.0
 

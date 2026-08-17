@@ -180,16 +180,74 @@ def test_band_suppresses_small_adjustments():
     assert held["TWEAK"] == 0.10, "a 0.02 nudge is below the band and should be skipped"
 
 
-def test_band_reduces_turnover_and_cost(panels):
-    """The whole reason the parameter exists."""
+def test_band_reduces_cost_only_when_positions_can_be_carried(panels):
+    """The band is useless under MIS, and that is the point.
+
+    A rebalance band saves money by *keeping* a position instead of re-trading
+    it. MIS forbids carrying, so every position is re-established every session
+    regardless — the band cannot help. It only bites for a strategy that holds
+    (`squares_off_daily=False`), which for a long/short book is impossible in
+    Indian cash equity (K-10).
+    """
     opens, closes = panels
-    bt = IntradayCrossSectionalBacktester(NSEEquityCostModel())
+    cfg_loose = {"n_legs": 5, "rebalance_band": 0.0}
+    cfg_tight = {"n_legs": 5, "rebalance_band": 1.5}
 
-    loose = bt.run(IntradayCrossSectional({"n_legs": 5, "rebalance_band": 0.0}), opens, closes)
-    tight = bt.run(IntradayCrossSectional({"n_legs": 5, "rebalance_band": 1.5}), opens, closes)
-
+    carrying = IntradayCrossSectionalBacktester(NSEEquityCostModel(), squares_off_daily=False)
+    loose = carrying.run(IntradayCrossSectional(cfg_loose), opens, closes)
+    tight = carrying.run(IntradayCrossSectional(cfg_tight), opens, closes)
     assert tight.avg_turnover < loose.avg_turnover
     assert tight.costs_pct < loose.costs_pct
+
+
+def test_daily_square_off_imposes_a_cost_floor(panels):
+    """An intraday book pays a full round trip every session, always.
+
+    Regression for a real bug: the backtester charged only `book - held`, which
+    is zero for a name that stays in the book. That silently understated the
+    cost of every intraday strategy and made the seed sleeve look profitable.
+    """
+    opens, closes = panels
+    model = NSEEquityCostModel()
+    strat = IntradayCrossSectional({"n_legs": 5})
+
+    squared = IntradayCrossSectionalBacktester(model, squares_off_daily=True).run(
+        strat, opens, closes
+    )
+    carried = IntradayCrossSectionalBacktester(model, squares_off_daily=False).run(
+        strat, opens, closes
+    )
+
+    assert squared.costs_pct > carried.costs_pct, "square-off must cost at least as much"
+
+    # Gross exposure is 1.0, so the floor is exactly one round trip per session.
+    per_session_bps = squared.costs_pct / squared.sessions * 100
+    assert per_session_bps == pytest.approx(model.round_trip_fee_bps_at(1_000), rel=0.02)
+
+
+def test_square_off_cost_is_independent_of_the_band(panels):
+    """Corollary: under MIS no turnover control can reduce the fee."""
+    opens, closes = panels
+    bt = IntradayCrossSectionalBacktester(NSEEquityCostModel(), squares_off_daily=True)
+
+    a = bt.run(IntradayCrossSectional({"n_legs": 5, "rebalance_band": 0.0}), opens, closes)
+    b = bt.run(IntradayCrossSectional({"n_legs": 5, "rebalance_band": 0.5}), opens, closes)
+    assert a.costs_pct == pytest.approx(b.costs_pct, rel=0.02)
+
+
+def test_a_band_wider_than_a_full_leg_never_opens_a_position(panels):
+    """Degenerate but worth pinning: the band suppresses the opening trade too.
+
+    A full leg is gross_cap / (2 * n_legs). A band above 1.0 makes the threshold
+    exceed that, so the move from flat to a full position is itself suppressed
+    and the book stays empty forever.
+    """
+    opens, closes = panels
+    r = IntradayCrossSectionalBacktester(NSEEquityCostModel()).run(
+        IntradayCrossSectional({"n_legs": 5, "rebalance_band": 2.0}), opens, closes
+    )
+    assert r.costs_pct == 0.0
+    assert r.net_return_pct == 0.0
 
 
 # ---------------------------------------------------------------------------

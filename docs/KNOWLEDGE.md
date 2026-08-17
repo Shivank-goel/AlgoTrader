@@ -52,6 +52,8 @@ Last updated: 2026-08-17 · Trials recorded: **162** (see `data/trials.json`)
 | K-24 | **NSE delivery** costs ~21.5 bps round trip (zero brokerage on Dhan; STT 0.1% *both* sides dominates). Cheaper than intraday only below ~2 round trips/year — otherwise intraday's 10.6 bps wins. | [measured] |
 | K-25 | **Fee drag by rebalance frequency at ₹10,000** (delivery): daily **47.8%/yr**, weekly 6.0%, monthly **0.7%**, quarterly 0.2%. **Turnover is the single most important design parameter at this account size.** | [measured] |
 | K-26 | Our cost models charge **no bid-ask spread** by default (`half_spread_bps = 0`), deliberately, so fee arithmetic stays auditable. Results must therefore be reported as a **break-even spread**, never as a net return. | [measured] |
+| K-28 | **An intraday (MIS) book pays a full round trip every session — 10.60 bps/day on gross 1.0 — and this is a FLOOR that no turnover control can lower.** Positions cannot be carried (K-10), so a name kept in the book is still sold at the close and rebought at the next open. Rebalance bands, signal smoothing and slower ranking all fail to help. | [measured] |
+| K-29 | The overnight-gap signal **persists for at least 8 sessions** (t = 2.3–6.8 at every horizon t+1…t+8), but **multi-day holds destroy it**: gross/rebalance is ~8 bps at H=1, −2.12 at H=5. The edge is purely *intraday*; the overnight legs reverse it (close-to-close is −6.1 bps/day). Therefore it cannot be made cheaper by holding longer. | [measured] |
 | K-27 | Corwin–Schultz estimates NSE F&O effective spread at ~42.7 bps median, ~68.7 bps for extreme-gap names. **Known to be biased high when daily ranges are wide**, so treat as an upper bound, not truth. Real quotes for liquid large caps are ~2–10 bps. | [external] + [measured] |
 
 ## 4. Integer-size granularity
@@ -73,15 +75,25 @@ Last updated: 2026-08-17 · Trials recorded: **162** (see `data/trials.json`)
 | K-41 | Crypto cross-sectional **momentum** | Best t=1.83, +49.3% over 2y, DSR **0.19**, max DD 10.5%. Positive in both years — the only thing that ever was. But **Q1 carries +41.2 of +49.3 points**. | **FAIL** — one good quarter |
 | K-42 | Crypto cross-sectional reversal | 36 configs, 0 with t>2, best t=0.49 | **FAIL** |
 | K-43 | Price action, structural stops, crypto | All 18 configs negative, **−41 to −55 bps/trade**, t from −4 to −24 | **FAIL** — worse than the indicators it replaced |
-| K-44 | **NSE overnight-gap intraday reversal** | Gross **8.96 bps/day at t=6.82** (clean spec). Fees 8.77 bps/day. Break-even spread **0.23 bps** vs real spreads of several bps. | **FAIL on cost, not on signal** |
+| K-44 | **NSE overnight-gap intraday reversal** | Gross **10.06 bps/day (10 legs), t=6.82** on the clean spec. Honest intraday cost is **10.60 bps/day** (K-28). **Net −0.54 to −3.24 bps/day, negative at every leg count.** | **FAIL on cost, not on signal** |
 | K-45 | NSE long-only monthly momentum | +17.78pp excess on today's F&O list → **+1.70pp (t=0.38)** on a point-in-time proxy universe. DSR **0.023**. | **FAIL** — 90% was survivorship bias |
 
-**K-46 — The most useful result so far**: K-44's signal is real and statistically strong; it
-fails only because fees consume 98% of it *at this account size*. Because of K-22, the same
-signal becomes viable around **₹10–30 lakh**, where per-order notional clears the brokerage
-cap. Break-even spread by capital (4× MIS, 40-name book): ₹10k → 0.26 bps · ₹10L → 2.62 bps ·
-₹30L → 5.76 bps. This is the first time "no edge" has resolved into "edge above ₹X".
-`[measured]`
+**K-46 — The most useful result so far**: K-44's signal is real and statistically strong
+(t=6.82, and it still predicts intraday returns **8 sessions later** at t=2.3–6.8). It fails
+only because the intraday cost floor (K-28) exceeds it *at this account size*. Because of
+K-22, the same signal turns positive once per-order notional clears the brokerage cap. With a
+20-name book at 4× MIS and 10.06 bps/day gross:
+
+| Capital | Per-order | Cost bps/day | Net bps/day | Net %/yr |
+|---|---|---|---|---|
+| ₹10,000 | ₹2,000 | 10.60 | −0.54 | −1.4% |
+| ₹1,00,000 | ₹20,000 | 10.60 | −0.54 | −1.4% |
+| **₹5,00,000** | ₹1,00,000 | 8.24 | **+1.82** | **+4.6%** |
+| ₹10,00,000 | ₹2,00,000 | 5.88 | +4.18 | +10.5% |
+| ₹30,00,000 | ₹6,00,000 | 4.31 | +5.75 | +14.5% |
+
+**Break-even is ~₹5 lakh**, and this is before any bid-ask spread (K-26), which pushes it
+higher. Still the only case where "no edge" has resolved into "edge above ₹X". `[measured]`
 
 ## 6. Dead ends — do not re-test without a new reason
 
@@ -114,6 +126,8 @@ false positives (K-72, K-73, K-75).
 
 | ID | Error | Root cause | Guard now in place |
 |---|---|---|---|
+| K-78 | The NSE intraday backtester charged only `book - held`, so a name kept in the book cost **nothing** to hold. Understated every intraday cost and made the seed sleeve look profitable. | Turnover accounting copied from a *positional* backtester, where carrying inventory is real. Under MIS you cannot carry. The code's own comment claimed it charged for re-establishing; it did not. | `squares_off_daily=True` charges a full round trip per session. `test_daily_square_off_imposes_a_cost_floor`. |
+| K-79 | The `IntradayCrossSectional` strategy class shipped with the K-71 contamination baked in: `Signal.OVERNIGHT_GAP` used *this* session's open. | Fixed the diagnosis in the analysis script but not in the class the backtester actually runs. | Signal now lags one session; `test_close_to_close_signal_ignores_todays_prices`. |
 | K-70 | Reported crypto momentum as reliably **negative** (t=−2.95); the true sign is **positive** (t=+2.10). A whole round was planned on the inverted conclusion. | `sort_values(ascending=reverse)` — the "momentum" branch sorted *descending*, so `index[-k:]` took the **lowest**-ranked names and went long them. | Explicit `Tilt` enum (`LONG_WINNERS`/`LONG_LOSERS`), never a bare sign. `test_long_winners_actually_buys_the_winners`. |
 | K-71 | NSE overnight-gap showed **Sharpe 6.48, t=13.41**. | Signal `O_t/C_{t-1}` and return `C_t/O_t` **share the price `O_t`**. Noise in that print makes a name look like a bigger loser *and* gives it a higher return. Mechanical, not economic. | Always check whether signal and return share a price. Clean spec uses `O_{t+1}→C_{t+1}`. |
 | K-72 | A 4h crypto config showed **+41.6%**; on six symbols instead of three it was **−58.4%**. | Swept 30 configs on a 3-symbol subset and reported the best. Textbook multiple testing. | Trials registry + deflated Sharpe (K-60). |

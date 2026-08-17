@@ -72,10 +72,22 @@ class IntradayCrossSectionalBacktester:
         *,
         capital_inr: float = 10_000.0,
         leverage: float = 4.0,
+        squares_off_daily: bool = True,
     ) -> None:
         self.cost_model = cost_model or NSEEquityCostModel()
         self.capital_inr = capital_inr
         self.leverage = leverage
+        # MIS positions CANNOT be carried overnight (K-10): the broker squares
+        # them off before the close. So every position is a full round trip
+        # every session, whether or not the name stays in the book.
+        #
+        # Charging only the change in the book — `book - held` — is correct for
+        # a positional strategy that carries inventory, and badly wrong here: it
+        # made a book that keeps 18% of its names overnight look 18% cheaper
+        # than it can possibly be. Set False only for a strategy that genuinely
+        # holds (delivery/CNC), which for a long/short book is impossible in
+        # Indian cash equity.
+        self.squares_off_daily = squares_off_daily
 
     @property
     def gross_notional(self) -> float:
@@ -154,8 +166,15 @@ class IntradayCrossSectionalBacktester:
 
             gross = float((book * session).sum())
 
-            delta = book - held
-            cost_pct = self._turnover_cost_pct(delta)
+            if self.squares_off_daily:
+                # Open the whole book at the open and close it at the close:
+                # one full round trip on every position, every session.
+                cost_pct = self._turnover_cost_pct(book) + self._turnover_cost_pct(-book)
+                delta = book * 2.0   # for reporting: gross traded, both legs
+            else:
+                delta = book - held
+                cost_pct = self._turnover_cost_pct(delta)
+
             net = gross - cost_pct / 100.0
 
             nets.append(net)
