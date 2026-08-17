@@ -314,6 +314,48 @@ execution, so results are reported as a **break-even spread** instead of assumin
 `breakeven_half_spread_bps()`. Resolving whether a given spread is achievable needs real
 quote data, which daily OHLC cannot supply.
 
+
+## Result: long-only monthly momentum — FAILS, and 90% of it was survivorship bias
+
+This is the structure that *fits* ₹10,000: monthly rebalance makes fee drag negligible
+(0.7%/yr on delivery, versus 47.8%/yr for daily), and 10-15 positions keeps integer-share
+sizing error near 14%.
+
+On today's F&O list it looks excellent — 56.77% CAGR against a 30.37% equal-weight
+benchmark. It is not.
+
+| Universe | CAGR | Benchmark | Excess | t(excess) | H1 excess | H2 excess |
+|---|---|---|---|---|---|---|
+| Today's F&O list (196) | 48.16% | 30.37% | **+17.78pp** | 1.46 | +56.19pp | −4.72pp |
+| Already liquid in Nov 2021 (100) | 24.55% | 22.85% | **+1.70pp** | 0.38 | +7.10pp | −2.27pp |
+
+**Excess return falls by 90% when the universe is corrected**, and what remains is
+indistinguishable from zero. Deflated Sharpe on excess returns: **0.023** against 186 trials.
+
+The bias is specific and it flatters momentum in particular: the panel is the *current* F&O
+list backfilled five years, so a stock promoted into F&O after a strong run appears with its
+whole run-up, while stocks demoted for poor performance are absent entirely. Momentum buys
+past winners, so it selects precisely the names the bias inserted. The correction here is a
+proxy — restricting to names already in the top 100 by turnover at the start of the sample —
+not a true point-in-time membership list.
+
+**Any long-only equity backtest on this data should be assumed inflated until the universe is
+survivorship-free.**
+
+## The structural picture at ₹10,000 in India
+
+Three viable structures, and each is blocked by something different:
+
+| Structure | Status |
+|---|---|
+| Positional long/short | **Impossible.** Retail cannot hold an overnight short in the cash segment, and F&O lot sizes are ₹5-15 lakh. |
+| Intraday long/short | Real signal (t = 6.82) but fees consume 98% of it. Needs ₹10-30 lakh — see the capital-threshold table above. |
+| Long-only positional | Affordable and cheap to run, but the apparent alpha is 90% survivorship bias and the remainder is noise. |
+
+The binding constraint is no longer "we have not found it yet". It is that two of the three
+structures are closed at this account size, and the third cannot be measured honestly on
+survivorship-biased data.
+
 ## Reproducing
 
 ```bash
