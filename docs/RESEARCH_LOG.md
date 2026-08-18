@@ -223,3 +223,59 @@ positional long/short is impossible (K-12), intraday long/short is below its cos
 (K-28), and long-only positional cannot be measured on survivorship-biased data (K-80).
 **K-90 is no longer merely the highest-value open item — it is the only one that can unblock
 anything at this account size.**
+
+## R-12 — Build a survivorship-free universe and re-test momentum honestly
+2026-08-18 · **FAIL — but the best honest result so far** · Uses: K-73, K-80, K-90 · Changes: K-45, K-47, K-73, K-85, K-86, K-87, K-90, K-95
+
+**Method** K-90 was the only item that could unblock anything at ₹10,000, so it went first.
+Solved with **daily bhavcopy**: NSE publishes one row per security that actually traded on
+each date, so reading day by day *is* the point-in-time universe — no reconstruction, no
+judgement, and a delisted name is simply present until it is not. Public and unauthenticated.
+Downloaded **4,064 trading days, 2011-07 → 2026-08, 3,483 securities**.
+
+**Three data traps found while building it**
+
+1. **ISIN only exists from ~2011-07** (K-86). Earlier files carry SYMBOL alone, and a ticker
+   freed by a delisting can be reassigned, so a symbol-keyed panel would splice two companies
+   into one history. `fetch_day` now raises before that date instead of silently returning
+   nothing — the first version dropped every pre-2012 row without saying why.
+2. **Bhavcopy prices are raw, not adjusted** (K-87), unlike the Yahoo data used until now.
+   Chaining raw closes reads WINSOME's consolidation as **+3750%**. Chaining
+   `close/prev_close` — which NSE adjusts on ex-dates — gives the true −1.9%. 2,661 affected
+   days in 3.38M rows; rare, but momentum selects extreme movers and would concentrate in
+   precisely them.
+3. Calendar month-ends are not trading days; rebalance dates must be the last *session* of
+   each month.
+
+**Result** 12-month formation, top 25 of a point-in-time top-200 universe, delivery costs:
+
+```
+excess +7.79pp over an equal-weight benchmark   t = 2.36   n = 168 months
+H1 +6.78pp    H2 +8.91pp        (the effect strengthens, it does not decay)
+```
+
+Structure is consistent rather than lucky: **all three best configs use 12-month formation**
+(3-month is worthless), **every 200-name universe beats its 100-name twin**, and 9/18 configs
+are positive in both halves. 12-1 momentum on a broad universe is the classic academic spec,
+which argues against overfitting.
+
+**Survivorship measured properly** Running the same code against a universe fixed to the final
+top-200 gives +13.87pp excess versus +7.79pp point-in-time — the bias is worth **7.18pp, about
+52% of the apparent excess**. The earlier crude proxy's "90%" overstated it (K-73 corrected).
+
+**Pass mark**
+
+```
+[FAIL] deflated Sharpe > 0.95 : 0.354   (0.0002 on the full 198-trial registry,
+                                         0.5897 scoped to the 36 NSE trials)
+[PASS] positive in both halves: H1 +6.78pp   H2 +8.91pp
+[PASS] >= 100 observations    : 168
+```
+
+**Verdict** FAIL, and deliberately not rescued. The trial-scope question (K-95) is real, but
+K-47 fails under **both** readings, so the verdict does not depend on it — and changing the
+scope after seeing a result is exactly what the pass mark exists to prevent.
+
+This is nonetheless the strongest honest result in the project: the first to clear ≥100
+observations and both halves on survivorship-free data, at t=2.36 with a sensible structure.
+It is a lead, not an edge.

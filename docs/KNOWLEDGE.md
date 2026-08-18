@@ -76,7 +76,8 @@ Last updated: 2026-08-17 · Trials recorded: **162** (see `data/trials.json`)
 | K-42 | Crypto cross-sectional reversal | 36 configs, 0 with t>2, best t=0.49 | **FAIL** |
 | K-43 | Price action, structural stops, crypto | All 18 configs negative, **−41 to −55 bps/trade**, t from −4 to −24 | **FAIL** — worse than the indicators it replaced |
 | K-44 | **NSE overnight-gap intraday reversal** | Gross **10.06 bps/day (10 legs), t=6.82** on the clean spec. Honest intraday cost is **10.60 bps/day** (K-28). **Net −0.54 to −3.24 bps/day, negative at every leg count.** | **FAIL on cost, not on signal** |
-| K-45 | NSE long-only monthly momentum | +17.78pp excess on today's F&O list → **+1.70pp (t=0.38)** on a point-in-time proxy universe. DSR **0.023**. | **FAIL** — 90% was survivorship bias |
+| K-45 | NSE long-only monthly momentum, **F&O-list universe** | +17.78pp excess → **+1.70pp (t=0.38)** on a crude point-in-time proxy. Superseded by K-47, which measures the bias properly. | **FAIL** |
+| K-47 | **NSE 12-1 momentum, true point-in-time universe** (K-85) | 15 years, 168 months, top-25 of a top-200 universe, delivery costs. Excess **+7.79pp over an equal-weight benchmark, t=2.36**, H1 +6.78pp / H2 **+8.91pp**. DSR **0.354** (0.59 family-scoped). 9/18 configs positive in both halves. | **FAIL** — passes 2 of 3, misses DSR |
 
 **K-46 — The most useful result so far**: K-44's signal is real and statistically strong
 (t=6.82, and it still predicts intraday returns **8 sessions later** at t=2.3–6.8). It fails
@@ -131,7 +132,7 @@ false positives (K-72, K-73, K-75).
 | K-70 | Reported crypto momentum as reliably **negative** (t=−2.95); the true sign is **positive** (t=+2.10). A whole round was planned on the inverted conclusion. | `sort_values(ascending=reverse)` — the "momentum" branch sorted *descending*, so `index[-k:]` took the **lowest**-ranked names and went long them. | Explicit `Tilt` enum (`LONG_WINNERS`/`LONG_LOSERS`), never a bare sign. `test_long_winners_actually_buys_the_winners`. |
 | K-71 | NSE overnight-gap showed **Sharpe 6.48, t=13.41**. | Signal `O_t/C_{t-1}` and return `C_t/O_t` **share the price `O_t`**. Noise in that print makes a name look like a bigger loser *and* gives it a higher return. Mechanical, not economic. | Always check whether signal and return share a price. Clean spec uses `O_{t+1}→C_{t+1}`. |
 | K-72 | A 4h crypto config showed **+41.6%**; on six symbols instead of three it was **−58.4%**. | Swept 30 configs on a 3-symbol subset and reported the best. Textbook multiple testing. | Trials registry + deflated Sharpe (K-60). |
-| K-73 | NSE long-only momentum showed **56.77% CAGR**, +17.78pp excess. | **Survivorship bias**: the universe is *today's* F&O list backfilled 5 years. Stocks promoted after a run-up appear with their whole run-up; demoted stocks are absent. Momentum buys past winners — it selects exactly what the bias inserted. | K-80. Always test against a point-in-time proxy universe. |
+| K-73 | NSE long-only momentum showed **56.77% CAGR**, +17.78pp excess. | **Survivorship bias**: the universe was *today's* F&O list backfilled. Stocks promoted after a run-up appear with their whole run-up; demoted stocks are absent. Momentum buys past winners — it selects exactly what the bias inserted. **Measured properly (K-85): the bias is worth 7.18pp of 13.87pp excess, i.e. ~52%.** The earlier '90%' from a crude proxy overstated it. | K-85 gives a true point-in-time universe. |
 | K-74 | Deflated Sharpe computed as exactly **0.0000**, which looked like a bug in the statistics. | Trials registry stored **annualised** Sharpe while `evaluate()` computes **per-period** — inflating trial dispersion ~7×. | Registry stores per-period Sharpe. Units asserted in tests. |
 | K-75 | Believed `swing_high >= swing_low` was an invariant. | They are independent forward-fills confirmed at different bars; in a trend the newer low can sit above an older high. **The test was wrong, the code was right.** | Replaced with "levels are drawn from actual past bars". |
 | K-76 | Paper trading booked −100% of notional on every close. | `close_position_verified` built its Order without a price, then `avg_fill_price = order.price or 0.0`. | `mark_price` is required in paper mode; `_on_fill` rejects non-positive prices. |
@@ -149,16 +150,20 @@ universes) — not care or attention.
 | K-81 | `data/hist/` — Delta crypto, 6 symbols, 730 days, 15m/1h/4h, real production prices | Only ~2 years available; venue has no more. Y1 bull, Y2 severe bear. |
 | K-82 | `data/trades.db` `news_items` — RSS headlines, collecting since 2026-08-10 | No backfill possible on free tiers. Coverage is heavily BTC-skewed (26 BTC / 4 XRP / 1 ETH in the first poll). |
 | K-83 | `data/microstructure.parquet` — funding, OI, basis, per scan | **No history exists and none can be obtained.** Records only; no feature may be built on it until enough time has passed. |
+| K-85 | **`data/nse/bhavcopy/` is the survivorship-free universe.** NSE publishes, per trading day, one row per security that actually traded — so reading day by day *is* the point-in-time universe, with no reconstruction. Public, unauthenticated, two formats (UDiFF from 2024-01, legacy before). **4,064 trading days cached, 2011-07 → 2026-08, 3,483 securities.** | [measured] |
+| K-86 | **ISIN only appears in bhavcopy from ~2011-07.** Earlier files carry SYMBOL only, and a ticker freed by a delisting can be reassigned — keying on it would splice two companies into one history. `fetch_day` **raises** before that date rather than degrading silently. Archives do go back to 2005 if a symbol-keyed panel is ever acceptable. | [measured] |
+| K-87 | **Bhavcopy prices are RAW, not adjusted** (unlike Yahoo). Chain `close/prev_close` instead — NSE adjusts `prev_close` on ex-dates. Raw close-to-close chaining reads WINSOME's consolidation as **+3750%** where the true return is −1.9%. 2,661 such days in 3.38M rows: rare, but momentum selects extreme movers, so it concentrates in exactly them. | [measured] |
 | K-84 | Delta cached CSVs under `data/*.csv` were **testnet** prices — frozen tails, flat bars, PAXGUSD at ₹0.01. Superseded by `data/hist/` parquet from production. | Do not use the CSVs for research. |
 
 ## 10. Open questions — ranked by value
 
 | ID | Question | Why it matters | Blocked on |
 |---|---|---|---|
-| K-90 | **Survivorship-free NSE universe** | Long-only positional is the *only* structure available at ₹10,000 (K-12), and it cannot be measured honestly without this (K-73, K-80). Highest-value open item. | Historical NIFTY 500 constituents, or a broad universe including delisted names |
+| K-90 | Survivorship-free NSE universe | **SOLVED (2026-08-18)** by K-85 — daily bhavcopy, 4,064 days, 15 years, no credentials. Kept here rather than deleted so the reference stays resolvable. | — |
 | K-91 | Real bid-ask spread on NSE names | Decides K-44/K-46 — whether the intraday signal is tradeable at scale | Quote/tick data from Dhan |
 | K-92 | Does a per-order **minimum** fee exist on Dhan? | On ₹1,000–10,000 orders an absolute floor would multiply effective bps and invalidate K-21 | One live ₹500 round trip |
 | K-93 | Does K-44's signal survive at lower turnover? | Fees scale with turnover (K-25); a weekly version might clear costs at ₹10,000 | Nothing — testable now |
+| K-95 | **Should the DSR trial count be family-scoped?** The pass mark says "full trial count". For K-47 that is 198, of which 120 are crypto trials on a different market — giving DSR 0.0002 versus 0.5897 scoped to the 36 NSE momentum trials. Bailey/López de Prado deflate for trials *within a search*. **Not urgent: K-47 fails either way**, so nothing currently hinges on it. Decide before a result sits between the two. | Deliberate, recorded decision — never a silent change after seeing a result |
 | K-94 | Is the illiquid-momentum premium (19.43% vs 8.51% CAGR) reproducible? | The strongest external claim we have, and small capital is *advantaged* by it | K-90, plus a universe wider than F&O names |
 
 ## 11. External claims not yet independently verified
