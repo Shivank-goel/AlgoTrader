@@ -338,3 +338,48 @@ is why sellers win on average. The positive-expectancy side, selling, needs SPAN
 structures reachable at ₹10,000, the systematic ones fail on cost and the affordable
 derivative one is negative-expectancy". Recorded because an overstated fact is exactly the
 kind of thing this knowledge base exists to catch.
+
+## R-15 — Is a profitable algo system possible, grown from ₹10,000?
+2026-08-25 · **YES, but gated on capital** · Uses: K-48, K-50b · Changes: K-51, K-52, K-53, §0
+
+**Method** K-48 showed the alpha sits in the low-turnover half, and a momentum index fund
+managing crores structurally cannot hold those names. So the question became: does a
+low-turnover tilt beat the fund by enough to overcome DIY's tax disadvantage?
+
+**Result** Decisively yes on gross return. Semi-annual, 12-month formation:
+
+```
+low-turnover  top10   27.24% CAGR      high-turnover  top10   16.06%
+low-turnover  top15   23.14%           high-turnover  top15   12.37%
+fund replica (top30, all liquidity)    19.10%
+```
+
+An 11pp spread between the liquidity halves, mirroring the external 19.43%/8.51% claim.
+
+**Concentration solves granularity** Top-25 leaves only 40% of picks affordable at ₹10,000;
+**top-8 leaves 79%**, and returns more. Fewer names is not a fitted parameter here — it is
+mechanically forced by a larger per-position budget.
+
+**The honest catch** Validated properly, the ₹10,000 top-8 version:
+
+```
+excess vs fund   +5.26pp/yr    t = 1.08        H1 +1.68pp   H2 +8.85pp
+max drawdown     52.3%  (fund replica 36.2%)   worst 12m    -49.1%
+DSR              0.096 full registry / 0.432 family-scoped
+```
+
+FAILS the pass mark, and the drawdown is the real objection: halving the account at some point
+is a lot to ask for an excess that cannot be statistically distinguished from the fund.
+
+**Selection risk, stated** top-8 was chosen *after* top-15 failed at ₹10,000 — the K-72 trap.
+Mitigating: the low-turnover tilt was predicted by external literature before testing, and
+concentration is forced by affordability rather than fitted. All 8 configs recorded to the
+registry regardless.
+
+**Break-even spread** ~50 bps half-spread; at 100 bps it loses to the fund (K-53). The alpha
+and the widest spreads live in the same names, so K-91 now gates a live decision.
+
+**Verdict** A profitable system is possible, and the path is capital, not code. At ₹50k–1 lakh
+the same strategy holds 15 names at 93–97% affordability with far less concentration risk and
+a +2 to +7pp edge over the fund. At ₹10,000 the only affordable version is a coin-flip on a
+52% drawdown. §0 updated.

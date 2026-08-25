@@ -43,6 +43,14 @@ on cost and the affordable derivative one (option buying) is the negative-expect
 trade whose profitable side needs ~₹1.5 lakh of margin (K-11b). SEBI measures the outcome:
 **91% of individual F&O traders lose** (K-14).
 
+**Is a profitable algo system possible at all? Yes — but it is gated on capital, not code
+(K-51, K-52).** Low-turnover momentum captures the capacity-constrained premium funds cannot
+touch, beating the fund replica by +5.26pp/yr. The catch is diversification: at ₹10,000 only a
+**concentrated 8-name** version is affordable, and it carries a **52% drawdown** for an excess
+that is not statistically significant (t=1.08). At **₹50,000–1 lakh** you hold 15 names at
+93–97% affordability with the same edge and far less concentration risk. That is the growth
+path: fund the account, not the algorithm.
+
 **What the system is worth**: a research instrument that reached a correct negative
 conclusion and rejected four convincing false positives on the way (K-70 to K-79). Revisit
 active strategies at **₹5 lakh+** (K-46), where the intraday cost floor stops binding.
@@ -105,6 +113,9 @@ active strategies at **₹5 lakh+** (K-46), where the intraday cost floor stops 
 | K-43 | Price action, structural stops, crypto | All 18 configs negative, **−41 to −55 bps/trade**, t from −4 to −24 | **FAIL** — worse than the indicators it replaced |
 | K-44 | **NSE overnight-gap intraday reversal** | Gross **10.06 bps/day (10 legs), t=6.82** on the clean spec. Honest intraday cost is **10.60 bps/day** (K-28). **Net −0.54 to −3.24 bps/day, negative at every leg count.** | **FAIL on cost, not on signal** |
 | K-45 | NSE long-only monthly momentum, **F&O-list universe** | +17.78pp excess → **+1.70pp (t=0.38)** on a crude point-in-time proxy. Superseded by K-47, which measures the bias properly. | **FAIL** |
+| K-51 | **There IS a path, and it runs through capital, not cleverness.** Low-turnover momentum captures the capacity-constrained premium a fund structurally cannot: top-8 low-turnover returns 27.24% CAGR vs 16.06% for the high-turnover half, and beats the fund replica by **+5.26pp/yr**. Concentration also fixes granularity — **top-8 has 79% of picks affordable at ₹10,000** vs 40% at top-25. | [measured] |
+| K-52 | **But the ₹10,000 version costs a 52% drawdown for an edge that is not significant.** Top-8: max DD **52.3%** (fund replica 36.2%), worst 12 months **−49.1%**, excess t=**1.08**, DSR 0.096 full / 0.432 family-scoped. Both halves positive but H1 only +1.68pp. At ₹50k–1 lakh you hold 15 names at **93–97% affordability** with the same edge and far less concentration risk — that is where this becomes attractive. | [measured] |
+| K-53 | Break-even on the low-turnover tilt is roughly a **50 bps half-spread**; at 100 bps it loses to the fund. Illiquid names are where the alpha is *and* where spreads are widest, so K-91 (real quote data) now gates a live decision rather than being merely interesting. | [measured] |
 | K-48 | **The momentum effect is real, persistent, and concentrated where theory says.** Positive in **all five** rolling 3-year windows (+4.4 to +11.9pp/yr, no single window significant, t 0.6–1.7). Splitting the universe by turnover: **low half +5.73pp (t=2.07), high half +2.31pp (t=0.79)** — the alpha lives in the less liquid names, exactly as the external capacity-constrained claim predicts (§11). | [measured] |
 | K-49 | **It does not survive ₹10,000 intact.** Integer shares: unconstrained t=2.36 → ₹1L t=2.25 (91% of picks affordable) → **₹10,000 t=1.68, only 40% of picks affordable, 17.6% median sizing error**. You end up holding a price-biased subset of the signal, not the signal. | [measured] |
 | K-50b | **DECISIVE: the same effect is buyable in a fund, and the fund wins.** NIFTY200 Momentum 30 index funds exist (UTI, ICICI, Motilal; expense ~0.3–0.5%) and their methodology — NIFTY200 universe, 6m+12m momentum, top 30, semi-annual — is a near-replica of our best config, which returns 19.10% CAGR. **DIY monthly after 20% STCG ≈ 15.3%/yr; the fund after fee and 12.5% LTCG ≈ 16.4%/yr.** The gap is structural, not a tuning artefact: **a fund's internal rebalancing is not a taxable event for the unitholder, while every DIY rebalance is.** DIY cannot replicate that. | [measured] + [external] |
