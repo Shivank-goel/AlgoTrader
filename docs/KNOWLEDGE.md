@@ -16,9 +16,29 @@ this file is the answer, not the journey.
   cited source, not independently verified · `[inferred]` reasoning from other facts ·
   `[assumed]` load-bearing but unverified — these are the dangerous ones.
 
-Last updated: 2026-08-17 · Trials recorded: **162** (see `data/trials.json`)
+Last updated: 2026-08-25 · Trials recorded: **198** (see `data/trials.json`)
 
 ---
+
+## 0. CONCLUSION (2026-08-25)
+
+**There is no tradeable edge at ₹10,000 that beats buying a momentum index fund.**
+That is the answer, reached after ~200 tested hypotheses across two markets.
+
+- Every **active** structure is closed: positional long/short is impossible (K-12), intraday
+  long/short sits below a cost floor it cannot amortise (K-28, K-44).
+- The one **real** effect found — NSE 12-1 momentum, survivorship-free, persistent across all
+  five 3-year windows, concentrated in low-turnover names (K-47, K-48) — degrades badly at
+  ₹10,000 because only 40% of its picks are affordable (K-49), and is **available in a fund
+  that beats DIY after tax** (K-50b).
+- It also never cleared the pre-committed pass mark (DSR 0.354 against 0.95).
+
+**What to do with ₹10,000: buy a NIFTY200 Momentum 30 index fund.** It captures the same
+effect, defers tax that DIY realises monthly, and costs nothing to operate.
+
+**What the system is worth**: a research instrument that reached a correct negative
+conclusion and rejected four convincing false positives on the way (K-70 to K-79). Revisit
+active strategies at **₹5 lakh+** (K-46), where the intraday cost floor stops binding.
 
 ## 1. Objective and constraints
 
@@ -77,6 +97,9 @@ Last updated: 2026-08-17 · Trials recorded: **162** (see `data/trials.json`)
 | K-43 | Price action, structural stops, crypto | All 18 configs negative, **−41 to −55 bps/trade**, t from −4 to −24 | **FAIL** — worse than the indicators it replaced |
 | K-44 | **NSE overnight-gap intraday reversal** | Gross **10.06 bps/day (10 legs), t=6.82** on the clean spec. Honest intraday cost is **10.60 bps/day** (K-28). **Net −0.54 to −3.24 bps/day, negative at every leg count.** | **FAIL on cost, not on signal** |
 | K-45 | NSE long-only monthly momentum, **F&O-list universe** | +17.78pp excess → **+1.70pp (t=0.38)** on a crude point-in-time proxy. Superseded by K-47, which measures the bias properly. | **FAIL** |
+| K-48 | **The momentum effect is real, persistent, and concentrated where theory says.** Positive in **all five** rolling 3-year windows (+4.4 to +11.9pp/yr, no single window significant, t 0.6–1.7). Splitting the universe by turnover: **low half +5.73pp (t=2.07), high half +2.31pp (t=0.79)** — the alpha lives in the less liquid names, exactly as the external capacity-constrained claim predicts (§11). | [measured] |
+| K-49 | **It does not survive ₹10,000 intact.** Integer shares: unconstrained t=2.36 → ₹1L t=2.25 (91% of picks affordable) → **₹10,000 t=1.68, only 40% of picks affordable, 17.6% median sizing error**. You end up holding a price-biased subset of the signal, not the signal. | [measured] |
+| K-50b | **DECISIVE: the same effect is buyable in a fund, and the fund wins.** NIFTY200 Momentum 30 index funds exist (UTI, ICICI, Motilal; expense ~0.3–0.5%) and their methodology — NIFTY200 universe, 6m+12m momentum, top 30, semi-annual — is a near-replica of our best config, which returns 19.10% CAGR. **DIY monthly after 20% STCG ≈ 15.3%/yr; the fund after fee and 12.5% LTCG ≈ 16.4%/yr.** The gap is structural, not a tuning artefact: **a fund's internal rebalancing is not a taxable event for the unitholder, while every DIY rebalance is.** DIY cannot replicate that. | [measured] + [external] |
 | K-47 | **NSE 12-1 momentum, true point-in-time universe** (K-85) | 15 years, 168 months, top-25 of a top-200 universe, delivery costs. Excess **+7.79pp over an equal-weight benchmark, t=2.36**, H1 +6.78pp / H2 **+8.91pp**. DSR **0.354** (0.59 family-scoped). 9/18 configs positive in both halves. | **FAIL** — passes 2 of 3, misses DSR |
 
 **K-46 — The most useful result so far**: K-44's signal is real and statistically strong

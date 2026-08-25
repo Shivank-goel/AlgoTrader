@@ -279,3 +279,38 @@ scope after seeing a result is exactly what the pass mark exists to prevent.
 This is nonetheless the strongest honest result in the project: the first to clear ≥100
 observations and both halves on survivorship-free data, at t=2.36 with a sensible structure.
 It is a lead, not an edge.
+
+## R-13 — Is the momentum effect tradeable at ₹10,000?
+2026-08-25 · **CONCLUSION: no — buy the fund** · Uses: K-47, K-31, K-94 · Changes: K-48, K-49, K-50b, §0
+
+**Method** Three checks on the one real effect found: does it survive integer shares at
+₹10,000, where does the alpha live, and is it persistent — then the question that decides
+everything, whether it can simply be bought.
+
+**Integer shares (K-49)** Unconstrained t=2.36 → ₹1 lakh t=2.25 (91% of picks affordable)
+→ **₹10,000 t=1.68, only 40% affordable, 17.6% median sizing error.** At this size you hold a
+price-biased subset of the signal rather than the signal.
+
+**Where the alpha lives (K-48)** Splitting the universe by turnover: low half **+5.73pp
+(t=2.07)**, high half **+2.31pp (t=0.79)**. The alpha is in the less liquid names, exactly as
+the capacity-constrained claim in §11 predicts. Independent support for the effect being real.
+
+**Persistence (K-48)** Positive in **all five** rolling 3-year windows (+4.4 to +11.9pp/yr).
+No single window is individually significant (t 0.6–1.7), but the sign is unbroken over 15
+years. Persistence, not one episode.
+
+**The decisive check (K-50b)** NIFTY200 Momentum 30 index funds already exist, and their
+methodology is a near-replica of our best config — which returns 19.10% CAGR semi-annually.
+
+```
+DIY monthly, after 20% STCG                      ~15.3%/yr
+Index fund, after ~0.4% expense and 12.5% LTCG   ~16.4%/yr
+```
+
+The tax arithmetic here is approximate, but the direction is structural and robust: **a
+fund's internal rebalancing is not a taxable event for the unitholder, while every DIY
+rebalance is.** DIY cannot replicate that at any level of skill.
+
+**Verdict** The search is over for this account size. The effect is real, persistent and
+correctly located — and it is better bought than built. Recorded as §0 in KNOWLEDGE.md.
+Revisit active strategies at ₹5 lakh+ (K-46), where the intraday cost floor stops binding.
