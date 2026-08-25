@@ -340,7 +340,7 @@ derivative one is negative-expectancy". Recorded because an overstated fact is e
 kind of thing this knowledge base exists to catch.
 
 ## R-15 — Is a profitable algo system possible, grown from ₹10,000?
-2026-08-25 · **YES, but gated on capital** · Uses: K-48, K-50b · Changes: K-51, K-52, K-53, §0
+2026-08-25 · **YES, but gated on capital** · Uses: K-48, K-50b · Changes: K-56, K-57, K-58, §0
 
 **Method** K-48 showed the alpha sits in the low-turnover half, and a momentum index fund
 managing crores structurally cannot hold those names. So the question became: does a
@@ -376,7 +376,7 @@ Mitigating: the low-turnover tilt was predicted by external literature before te
 concentration is forced by affordability rather than fitted. All 8 configs recorded to the
 registry regardless.
 
-**Break-even spread** ~50 bps half-spread; at 100 bps it loses to the fund (K-53). The alpha
+**Break-even spread** ~50 bps half-spread; at 100 bps it loses to the fund (K-58). The alpha
 and the widest spreads live in the same names, so K-91 now gates a live decision.
 
 **Verdict** A profitable system is possible, and the path is capital, not code. At ₹50k–1 lakh
