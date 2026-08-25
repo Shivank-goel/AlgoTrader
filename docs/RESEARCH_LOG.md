@@ -314,3 +314,27 @@ rebalance is.** DIY cannot replicate that at any level of skill.
 **Verdict** The search is over for this account size. The effect is real, persistent and
 correctly located — and it is better bought than built. Recorded as §0 in KNOWLEDGE.md.
 Revisit active strategies at ₹5 lakh+ (K-46), where the intraday cost floor stops binding.
+
+## R-14 — Correction: options ARE affordable at ₹10,000
+2026-08-25 · **CORRECTION** · Changes: K-11, K-11b, K-12, §0
+
+**Prompted by** the user asking whether the conclusion really implied nobody trades ₹10,000 in
+India. It did not, but K-11 was overstated and needed fixing.
+
+**The error** K-11 read "NSE F&O lot sizes are ₹5–15 lakh notional, unreachable at ₹10,000",
+generalising a **futures** constraint to all of F&O. Options are bought on *premium*, not
+notional. Measured on the F&O bhavcopy for 2026-08-21: **9,232 of 16,751 traded option
+contracts (55%) cost ≤ ₹10,000 per lot**, including liquid NIFTY strikes at ₹773 against 17.7M
+open interest. Options are not merely reachable at this size — they are where most retail
+volume sits.
+
+**Why the conclusion survives** Access is not edge. The affordable side is option *buying*,
+which pays the volatility risk premium: index implied vol persistently exceeds realised, which
+is why sellers win on average. The positive-expectancy side, selling, needs SPAN margin around
+₹1.3–1.9 lakh per NIFTY lot. So ₹10,000 buys entry to the structurally losing side, and SEBI's
+91% retail F&O loss rate (K-14) is the measured outcome.
+
+**Verdict** §0 stands, with its scope stated honestly: not "nobody trades ₹10,000", but "of the
+structures reachable at ₹10,000, the systematic ones fail on cost and the affordable
+derivative one is negative-expectancy". Recorded because an overstated fact is exactly the
+kind of thing this knowledge base exists to catch.

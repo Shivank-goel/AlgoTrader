@@ -36,6 +36,13 @@ That is the answer, reached after ~200 tested hypotheses across two markets.
 **What to do with ₹10,000: buy a NIFTY200 Momentum 30 index fund.** It captures the same
 effect, defers tax that DIY realises monthly, and costs nothing to operate.
 
+**This is not "nobody trades ₹10,000 in India."** Millions do — options alone are affordable
+at this size (K-11), which an earlier version of K-11 wrongly denied. The claim is narrower
+and survives the correction: of the structures reachable at ₹10,000, the systematic ones fail
+on cost and the affordable derivative one (option buying) is the negative-expectancy side of a
+trade whose profitable side needs ~₹1.5 lakh of margin (K-11b). SEBI measures the outcome:
+**91% of individual F&O traders lose** (K-14).
+
 **What the system is worth**: a research instrument that reached a correct negative
 conclusion and rejected four convincing false positives on the way (K-70 to K-79). Revisit
 active strategies at **₹5 lakh+** (K-46), where the intraday cost floor stops binding.
@@ -54,8 +61,9 @@ active strategies at **₹5 lakh+** (K-46), where the intraday cost floor stops 
 | ID | Fact | Confidence |
 |---|---|---|
 | K-10 | **Retail cannot hold an overnight short in NSE cash equity.** Shorts must be squared off intraday (MIS). SLB exists but is illiquid and impractical at this size. | [external] |
-| K-11 | NSE F&O lot sizes are **₹5–15 lakh notional** post-SEBI Oct-2024. Unreachable at ₹10,000. | [external] |
-| K-12 | **Therefore: positional long/short is structurally impossible at ₹10,000.** Only long-only positional, or intraday long/short, are available. | [inferred] from K-10, K-11 |
+| K-11 | NSE F&O **futures** lots are ₹5–15 lakh notional — unreachable at ₹10,000. **But options are bought on PREMIUM, not notional, and are very much reachable**: on 2026-08-21, **9,232 of 16,751 traded option contracts (55%) cost ≤ ₹10,000 per lot**, including liquid NIFTY strikes at ₹773/lot against 17.7M open interest. An earlier version of this fact wrongly generalised the futures constraint to all F&O. | [measured] |
+| K-11b | **Access is not edge, and at ₹10,000 you get the losing side.** Option *buying* is affordable and carries the volatility risk premium against it — index implied vol persistently exceeds realised, which is why sellers win on average. Option *selling* has the positive expectancy but needs SPAN margin of roughly **₹1.3–1.9 lakh per NIFTY lot** (~8–12% of ₹15.8 lakh notional). So ₹10,000 buys entry to the structurally negative-expectancy side only. | [external] + [inferred] |
+| K-12 | **Positional long/short in CASH equity is impossible at ₹10,000** (K-10 forbids overnight shorts; futures lots are out of reach). Available: long-only positional, intraday long/short, and **option buying** — the last being affordable but negative-expectancy (K-11b). | [inferred] from K-10, K-11, K-11b |
 | K-13 | SEBI algo rules fully enforced since **1 Apr 2026**. Under **10 orders/sec** counts as a normal API user — no algo registration. Static IP whitelisting with the broker is mandatory. | [external] |
 | K-14 | **91% of individual F&O traders lost money in FY25** (₹1.05 trillion aggregate). **96–97% of prop/FPI profits come from algorithms.** Speed-dependent strategies are unwinnable from a home connection. | [external] SEBI |
 | K-15 | India taxes crypto gains at **30% flat with no loss offset**; equity F&O is business income where **losses offset gains**. This alone favours equities strongly for a loss-making-tail strategy. | [external] |
