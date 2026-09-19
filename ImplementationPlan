@@ -60,6 +60,10 @@ evidence and integration gates remain open; implementation is not qualification.
 
 - Implemented: immutable one-session exports with event ordering, instrument-master,
   explicit intraday corporate-action policy, freshness, quality and content hashes.
+- Integrated: the persistent recorder supervisor recognizes configured session
+  boundaries, weekends and reviewed holidays, reports the next opening, preserves a
+  same-day manual stop and bounds crash restarts. The broker's market status is the
+  final paper-fill gate. Missing/wrong-year calendars fail closed.
 - Integrated: shadow replay accepts and fully revalidates the exported artifact.
 - Completion gate: exported sessions reproduce decisions and quality metrics.
   Unit fixtures pass; a representative market-hours export remains externally pending.
@@ -103,6 +107,16 @@ evidence and integration gates remain open; implementation is not qualification.
   emits auditable paper intents without broker access. Remaining: connect a reviewed
   NSE strategy producer and define forward acceptance criteria. Synthetic engineering
   replay is not deployment.
+- Integrated: an observation-only continuous candidate lab records immutable,
+  non-overlapping momentum/reversal decisions from fresh FYERS quotes and evaluates
+  spread/fee-aware forward returns against a benchmark. It expires missed horizons,
+  exposes metrics on the dashboard and has no path to intents or broker mutations.
+  These observations are research input, not qualification.
+- Implemented: a versioned 20-stock forward universe, lagged broad-market regime
+  gate, predeclared momentum/breakout/residual-reversal families, frozen
+  lower-confidence-bound selection and whole-share ₹10,000 sizing. Unsafe regimes,
+  evidence ties and unqualified families resolve to cash. The registered NSE
+  adapter uses next-bar timing, FYERS delivery costs and configurable spread stress.
 - Completion gate: reviewed qualification plus forward evidence and replay/forward
   decision parity. A fixed number of paper-trading days alone is insufficient.
 
@@ -113,11 +127,11 @@ evidence and integration gates remain open; implementation is not qualification.
   submissions still require reconciliation. Integrity-checked backups and a
   fail-closed readiness/alert report are exposed through the CLI.
 - Implemented: REST broker cash/holding/day-position reconciliation blocks entries
-  and persists a halt on divergence. The dashboard exposes readiness and an
-  authenticated FYERS halt. Remaining: streaming order updates and richer dashboard
-  presentation for connection health, stale-data warnings,
-  qualification blockers, reservations, net P&L and an authenticated entry halt.
-- Implemented: a verified direct-dependency lock and isolated restore-drill command.
+  and persists a halt on divergence. The FYERS-only dashboard presents recorder,
+  account, quote, accounting, position, order, settlement, evidence and alert state,
+  with authenticated recorder/backup/halt controls. Remaining: streaming order updates.
+- Implemented: a verified direct-dependency lock, retained daily backups, isolated
+  restore drills and private Azure systemd/SSH-tunnel deployment artifacts.
   Remaining: external alert delivery and a checked manual release. Logs continue to
   use existing secret-safe boundaries.
 - Completion gate: crash, timeout, partial-fill and reconnect drills pass;

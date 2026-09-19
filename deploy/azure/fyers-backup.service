@@ -1,0 +1,13 @@
+[Unit]
+Description=Verified FYERS SQLite backup
+
+[Service]
+Type=oneshot
+User=shivank
+Group=shivank
+WorkingDirectory=/home/shivank/Crypto-trader
+EnvironmentFile=/home/shivank/Crypto-trader/.env
+ExecStart=/home/shivank/Crypto-trader/.venv312/bin/python main.py fyers backup
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

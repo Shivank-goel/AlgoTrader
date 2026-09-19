@@ -171,6 +171,8 @@ def test_qualification_recomputes_and_invalidates_changed_registry(tmp_path, mon
         "costs_sha256": digest(tmp_path / "config/fyers_costs.yaml"),
         "data_path": str(data), "data_sha256": digest(data),
         "reviewed_net_costs_and_data": True, "net_returns": returns,
+        "forward_evidence": {"accepted": True, "observations": 20,
+                             "selector_sha256": "a" * 64},
         "code_artifacts": {str(code.relative_to(tmp_path)): digest(code)},
         "config_artifacts": {str(config.relative_to(tmp_path)): digest(config)}}))
     assert qualification(evidence, trials) == (True, "fixture")

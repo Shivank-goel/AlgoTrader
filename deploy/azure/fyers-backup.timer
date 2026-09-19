@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily FYERS journal backup
+
+[Timer]
+OnCalendar=*-*-* 18:00:00 Asia/Kolkata
+Persistent=true
+RandomizedDelaySec=300
+Unit=fyers-backup.service
+
+[Install]
+WantedBy=timers.target

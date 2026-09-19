@@ -1,0 +1,21 @@
+[Unit]
+Description=FYERS NSE operations dashboard and recorder supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=shivank
+Group=shivank
+WorkingDirectory=/home/shivank/Crypto-trader
+EnvironmentFile=/home/shivank/Crypto-trader/.env
+ExecStart=/home/shivank/Crypto-trader/.venv312/bin/python main.py dashboard --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

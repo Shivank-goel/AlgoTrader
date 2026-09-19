@@ -1,0 +1,13 @@
+# Forward research only. No family is qualified and this file cannot enable live execution.
+enabled: true
+universe_file: config/nse_forward_universe.yaml
+candidates: []
+regime_selector:
+  min_regime_confidence: 0.60
+  top_n: 5
+  capital_inr: 10000
+  max_order_inr: 2000
+  evidence:
+    - {family: momentum_6_12, lower_confidence_bound: 0.0, qualified: false}
+    - {family: donchian_breakout, lower_confidence_bound: 0.0, qualified: false}
+    - {family: residual_reversal, lower_confidence_bound: 0.0, qualified: false}

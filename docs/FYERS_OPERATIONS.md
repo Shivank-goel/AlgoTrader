@@ -19,10 +19,42 @@ Run from the repository with `.venv312/bin/python`:
 .venv312/bin/python main.py fyers halt "operator stop"
 ```
 
+The dashboard is FYERS/NSE-only and defaults to `http://127.0.0.1:8000`. It
+shows recorder/account/market health, executable quotes, paper accounting,
+positions and reconciliation, orders/intents, settlements, qualification and
+operational alerts. Authenticated controls can start/stop recording, create a
+verified backup and persistently halt new entries. There is no order or live-enable route.
+
+The dashboard also runs the observation-only strategy lab configured in
+`config/fyers_strategy_lab.yaml`. It uses the hash-bound 20-stock snapshot in
+`config/nse_forward_universe.yaml`, requires at least ten fresh two-sided books,
+and records at most one immutable regime decision per session. Trending markets
+admit momentum/breakout research; ranging markets admit residual-reversal research;
+volatile, falling, unknown and low-confidence states remain in cash. No family is
+currently qualified. The existing scheduler rechecks hash-bound qualification
+before creating paper intents, and this path never submits broker orders.
+
+Research the families through `research run --adapter csv_nse_regime`. Registered
+CSV artifacts, dates, family, rebalance cadence, spread stress and costs remain
+part of the frozen experiment. Never edit a candidate or universe in place; create
+a new versioned ID.
+
 Log in through the printed browser URL when the token expires. No unattended
 2FA bypass is implemented. `record` finishes after the requested duration;
 Ctrl-C also shuts down the isolated SDK process. It sends no trading orders.
 Do not run two recorders against the same database: an exclusive lock enforces this.
+
+With `auto_record: true`, the dashboard supervisor starts the recorder at the
+configured `session_start`, stops it after `session_end`, and stays idle on weekends
+and dates in `config/nse_holidays.yaml`. Its state and a same-day manual stop survive
+dashboard restarts; a manual stop clears on the next date. Unexpected exits use a
+bounded restart budget and backoff. The FYERS broker market-status response is still
+required before paper fills, so an unexpected exchange closure fails closed.
+
+Replace and review `config/nse_holidays.yaml` before each calendar year. A missing,
+invalid or wrong-year file disables automatic recording and reports
+`calendar_unavailable`; it never assumes that the exchange is open. Special sessions
+such as Muhurat trading require an explicit reviewed schedule change.
 
 Settings: `config/fyers_runtime.yaml`; REST endpoint: `config/fyers.yaml`;
 published tariff: `config/fyers_costs.yaml`; credentials: gitignored `.env`.
@@ -82,6 +114,7 @@ code_artifacts: non-empty mapping of reviewed repository code paths to SHA-256
 config_artifacts: non-empty mapping of reviewed config paths to SHA-256
 reviewed_net_costs_and_data: true only after reviewing fees, spread and leakage
 net_returns: chronological net per-period returns from the registered run
+forward_evidence: accepted review, at least 20 evaluated observations and selector hash
 ```
 
 The checker recomputes DSR against all registry trials, checks sample count and
@@ -101,22 +134,26 @@ Rejected intents are journalled and not retried; expired intents need a new sign
    behavior. The short external test only proved connection and recording.
 2. Validate charges against account records; qualify a strategy on clean data and
    the full registry (206 trials observed, no new trials in this integration).
-3. Integrate the qualified strategy's signal loop, settlement-aware accounting and
-   automated exits; validate paper outcomes and conservative fill assumptions.
+3. Accumulate representative strategy-lab observations, expand the universe, and
+   run historical/OOS research. Only a separately qualified strategy may enter the
+   existing paper-intent path; automated exits remain incomplete.
 4. Externally validate account reconciliation fields and complete the order-update
    stream; perform timeout, partial-fill and reconnect drills; confirm static outbound IP.
 5. Review evidence before introducing a live enable path. Current mode is observation.
 
-The dashboard exposes FYERS readiness and an authenticated persistent halt; its
-remaining trading views still describe Delta and do not enable FYERS orders.
+Azure deployment units and the SSH-tunnel procedure are documented in
+`deploy/azure/README.md`. The dashboard binds to VM localhost; do not expose port
+8000 through the Azure NSG.
 Delta now defaults to paper. The unused ccxt requirement was replaced with the
 official FYERS SDK. SDK 3.1.18 pins older HTTP dependencies; `pip check` is clean,
 but upgrading that SDK/dependency set requires a deliberate compatibility review.
 
-## Verification (2026-09-18)
+## Verification (2026-09-20)
 
-Full regression suite after P0 paper-risk changes: **425 passed**. Existing deprecation warnings remain;
-this is not a warning-free build. `pip check` reports no broken requirements.
+The session calendar and supervisor have focused coverage for regular sessions,
+weekends, holidays, next-open reporting, wrong-year failure and manual-stop behavior.
+The complete-suite count is recorded in `docs/CURRENT_STATE.md`. Existing deprecation
+warnings remain; this is not a warning-free build. `pip check` reports no broken requirements.
 Two bounded external recordings (15 and 10 seconds) each established one stream
 connection, recorded two ticks and shut down cleanly. Both recorded books were
 one-sided and therefore rejected as executable quotes. No order was submitted.

@@ -7,8 +7,8 @@ from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -37,6 +37,17 @@ class RuntimeConfig(BaseModel):
     backup_directory: str = "data/fyers/backups"
     backup_max_age_seconds: float = Field(default=172800, gt=0)
     alert_after_seconds: float = Field(default=300, gt=0)
+    auto_record: bool = False
+    session_start: str = Field(default="09:10", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    session_end: str = Field(default="15:35", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    holidays_file: str = "config/nse_holidays.yaml"
+    backup_retention_count: int = Field(default=14, ge=1, le=365)
+    recorder_poll_seconds: float = Field(default=30, ge=5, le=300)
+    recorder_max_restarts: int = Field(default=3, ge=0, le=20)
+    recorder_restart_window_seconds: float = Field(default=3600, ge=60, le=86400)
+    recorder_backoff_seconds: float = Field(default=30, ge=1, le=3600)
+    strategy_lab_file: str = "config/fyers_strategy_lab.yaml"
+    strategy_poll_seconds: float = Field(default=30, ge=5, le=300)
 
     @field_validator("symbols")
     @classmethod
@@ -44,6 +55,12 @@ class RuntimeConfig(BaseModel):
         if len(set(symbols)) != len(symbols) or any(not s.startswith("NSE:") or not s.endswith("-EQ") for s in symbols):
             raise ValueError("Use unique NSE cash equity symbols ending in -EQ")
         return symbols
+
+    @model_validator(mode="after")
+    def valid_session_window(self) -> RuntimeConfig:
+        if self.session_start >= self.session_end:
+            raise ValueError("session_start must be earlier than session_end")
+        return self
 
     @classmethod
     def load(cls, path: Path = ROOT / "config/fyers_runtime.yaml") -> RuntimeConfig:

@@ -10,7 +10,8 @@ No candidate is approved for deployment. Engineering completion cannot establish
   risk, execution and portfolio events. Trading defaults to paper.
 - `src/backtest/`: historical research simulators, costs and statistics.
 - `src/fyers/`: feed recording, explicit paper intents, accounting, qualification
-  and disabled order transport. Not an autonomous production strategy engine.
+  and disabled order transport. `src/shadow/continuous.py` is an observation-only
+  forward candidate lab; it cannot create intents or call a broker.
 - `src/execution/fyers.py`: read-only REST; `fyers_login.py`: explicit user login.
 - `docs/KNOWLEDGE.md`, `docs/RESEARCH_LOG.md`, `data/trials.json`: existing research
   evidence. Never relabel historical Dhan results as FYERS results.

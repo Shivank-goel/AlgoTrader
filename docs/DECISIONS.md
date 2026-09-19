@@ -41,3 +41,10 @@ alter risk/gates, approve promotion, or place live orders autonomously.
 **Reason:** automation magnifies data leakage and weak experimental controls.
 **Consequence:** experiments require frozen specifications, bounded campaigns, artifact
 hashes, immutable outcomes and human review before shadow qualification.
+
+## 2026-09-20 — FYERS dashboard is private and operational
+
+**Reason:** the Delta/crypto UI did not represent the selected FYERS/NSE system.
+**Consequence:** the dashboard exposes FYERS monitoring plus recorder, backup and
+entry-halt controls only. It binds to VM localhost and is reached through an SSH
+tunnel; no UI route enables live execution or submits broker orders.

@@ -5,7 +5,7 @@ import pytest
 
 from src.fyers.journal import Journal
 from src.fyers.models import RuntimeConfig
-from src.fyers.operations import backup_database, readiness, restore_drill, verify_backup
+from src.fyers.operations import backup_database, prune_backups, readiness, restore_drill, verify_backup
 
 
 def test_backup_is_consistent_verified_and_never_overwritten(tmp_path):
@@ -38,6 +38,20 @@ def test_restore_drill_never_replaces_source(tmp_path):
     assert report["events"] == 1 and not report["production_replaced"]
     assert source.read_bytes() == before
     assert (tmp_path / "drill/RESTORE_DRILL_ONLY").exists()
+
+
+def test_backup_retention_only_removes_verified_named_backups(tmp_path):
+    source = tmp_path / "runtime.db"
+    journal = Journal(source)
+    journal.close()
+    for index in range(3):
+        path = tmp_path / f"runtime-2026092{index}T120000Z.sqlite3"
+        backup_database(source, path)
+        os.utime(path, (index, index))
+    unrelated = tmp_path / "other.sqlite3"
+    unrelated.write_text("keep")
+    removed = prune_backups(tmp_path, retain=2)
+    assert len(removed) == 1 and unrelated.exists()
 
 
 def test_readiness_is_fail_closed_and_reports_stale_backup(tmp_path, monkeypatch):

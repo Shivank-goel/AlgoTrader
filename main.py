@@ -109,23 +109,20 @@ def paper(ctx):
 
 @cli.command()
 @click.option("--host", default="127.0.0.1")
-@click.option("--port", default=8080, type=int)
+@click.option("--port", default=8000, type=int)
 @click.pass_context
 def trade(ctx, host, port):
-    """Launch dashboard (engine starts via UI Start button)."""
-    from src.core.engine import TradingEngine
+    """Compatibility alias for the FYERS operations dashboard."""
     from src.dashboard.app import create_app
 
-    engine = TradingEngine(config_dir=ctx.obj["config"])
-    app = create_app(engine)
+    app = create_app()
     console.print(f"[bold green]Dashboard at http://{host}:{port}[/bold green]")
-    console.print("[dim]Engine is idle — click Start in the UI to begin scanning[/dim]")
     uvicorn.run(app, host=host, port=port)
 
 
 @cli.command()
 @click.option("--host", default="127.0.0.1")
-@click.option("--port", default=8080, type=int)
+@click.option("--port", default=8000, type=int)
 @click.pass_context
 def dashboard(ctx, host, port):
     """Start the web dashboard."""

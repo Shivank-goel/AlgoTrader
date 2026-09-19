@@ -1,4 +1,8 @@
-symbols: [NSE:SBIN-EQ, NSE:INFY-EQ]
+symbols: [NSE:RELIANCE-EQ, NSE:BHARTIARTL-EQ, NSE:HDFCBANK-EQ, NSE:ICICIBANK-EQ,
+  NSE:SBIN-EQ, NSE:AXISBANK-EQ, NSE:INFY-EQ, NSE:ONGC-EQ, NSE:SUNPHARMA-EQ,
+  NSE:ITC-EQ, NSE:TATASTEEL-EQ, NSE:ADANIPORTS-EQ, NSE:NTPC-EQ,
+  NSE:BAJFINANCE-EQ, NSE:KOTAKBANK-EQ, NSE:POWERGRID-EQ, NSE:HCLTECH-EQ,
+  NSE:TCS-EQ, NSE:BAJAJFINSV-EQ, NSE:ASIANPAINT-EQ]
 master_url: https://public.fyers.in/sym_details/NSE_CM_sym_master.json
 database: data/fyers/runtime.sqlite3
 sdk_logs: logs/fyers
@@ -16,3 +20,14 @@ trials_file: data/trials.json
 backup_directory: data/fyers/backups
 backup_max_age_seconds: 172800
 alert_after_seconds: 300
+auto_record: true
+session_start: "09:10"
+session_end: "15:35"
+holidays_file: config/nse_holidays.yaml
+backup_retention_count: 14
+recorder_poll_seconds: 30
+recorder_max_restarts: 3
+recorder_restart_window_seconds: 3600
+recorder_backoff_seconds: 30
+strategy_lab_file: config/fyers_strategy_lab.yaml
+strategy_poll_seconds: 30

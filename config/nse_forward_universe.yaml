@@ -1,0 +1,27 @@
+schema_version: 1
+universe_id: nifty50_liquid_affordable_20260817_v1
+captured_at: 2026-08-17
+source: data/nse/bhavcopy/days/2026-08-17.parquet
+source_sha256: a11782e65de2bdca8b66de5197f7d33acf095ce9e212a187380ed5a2af496e3a
+selection: Reviewed liquid NIFTY 50 subset; lower-priced names preferred for INR 10000 whole-share sizing.
+members:
+  - {symbol: NSE:RELIANCE-EQ, isin: INE002A01018, reference_price: 1316.00, turnover_inr: 17514489451.00}
+  - {symbol: NSE:BHARTIARTL-EQ, isin: INE397D01024, reference_price: 1969.30, turnover_inr: 10991199835.40}
+  - {symbol: NSE:HDFCBANK-EQ, isin: INE040A01034, reference_price: 729.00, turnover_inr: 10785963097.50}
+  - {symbol: NSE:ICICIBANK-EQ, isin: INE090A01021, reference_price: 1415.30, turnover_inr: 7939052356.40}
+  - {symbol: NSE:SBIN-EQ, isin: INE062A01020, reference_price: 1061.20, turnover_inr: 7468887651.40}
+  - {symbol: NSE:AXISBANK-EQ, isin: INE238A01034, reference_price: 1227.30, turnover_inr: 7425517229.60}
+  - {symbol: NSE:INFY-EQ, isin: INE009A01021, reference_price: 1139.90, turnover_inr: 6648263350.20}
+  - {symbol: NSE:ONGC-EQ, isin: INE213A01029, reference_price: 238.49, turnover_inr: 6037641803.07}
+  - {symbol: NSE:SUNPHARMA-EQ, isin: INE044A01036, reference_price: 1882.00, turnover_inr: 3597175128.70}
+  - {symbol: NSE:ITC-EQ, isin: INE154A01025, reference_price: 273.05, turnover_inr: 3507177243.10}
+  - {symbol: NSE:TATASTEEL-EQ, isin: INE081A01020, reference_price: 186.00, turnover_inr: 3004450129.37}
+  - {symbol: NSE:ADANIPORTS-EQ, isin: INE742F01042, reference_price: 1691.00, turnover_inr: 2691223154.50}
+  - {symbol: NSE:NTPC-EQ, isin: INE733E01010, reference_price: 337.00, turnover_inr: 2645197334.50}
+  - {symbol: NSE:BAJFINANCE-EQ, isin: INE296A01032, reference_price: 1089.30, turnover_inr: 2504164050.10}
+  - {symbol: NSE:KOTAKBANK-EQ, isin: INE237A01036, reference_price: 392.70, turnover_inr: 2009023535.60}
+  - {symbol: NSE:POWERGRID-EQ, isin: INE752E01010, reference_price: 266.15, turnover_inr: 1768945685.55}
+  - {symbol: NSE:HCLTECH-EQ, isin: INE860A01027, reference_price: 1325.00, turnover_inr: 1295226436.90}
+  - {symbol: NSE:TCS-EQ, isin: INE467B01029, reference_price: 2313.20, turnover_inr: 5197011547.50}
+  - {symbol: NSE:BAJAJFINSV-EQ, isin: INE918I01026, reference_price: 2005.00, turnover_inr: 2062603458.20}
+  - {symbol: NSE:ASIANPAINT-EQ, isin: INE021A01026, reference_price: 2687.50, turnover_inr: 845248926.50}

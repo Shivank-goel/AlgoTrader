@@ -1,7 +1,7 @@
 """Offline experiment registration, legacy import and crash recovery."""
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 import click
 
@@ -119,7 +119,7 @@ def recover_publication(ctx, experiment_id: str, trials: Path):
 
 @research.command("run")
 @click.argument("experiment_id")
-@click.option("--adapter", type=click.Choice(["csv_xs_momentum"]), required=True)
+@click.option("--adapter", type=click.Choice(["csv_xs_momentum", "csv_nse_regime"]), required=True)
 @click.option("--root", type=click.Path(exists=True, path_type=Path), default=".")
 @click.option("--trials", type=click.Path(path_type=Path), default="data/trials.json")
 @click.pass_context

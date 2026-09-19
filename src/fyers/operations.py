@@ -59,6 +59,20 @@ def verify_backup(path: Path) -> dict:
     return {"integrity": integrity, "events": events, "tables": sorted(tables)}
 
 
+def prune_backups(directory: Path, *, retain: int) -> list[str]:
+    """Remove only verified-name FYERS backups beyond the configured retention count."""
+    if type(retain) is not int or retain < 1:
+        raise ValueError("Backup retention must be positive")
+    backups = sorted(directory.glob("runtime-????????T??????Z.sqlite3"),
+                     key=lambda item: item.stat().st_mtime, reverse=True)
+    removed = []
+    for path in backups[retain:]:
+        verify_backup(path)
+        path.unlink()
+        removed.append(str(path))
+    return removed
+
+
 def restore_drill(backup: Path, output_directory: Path) -> dict:
     """Restore into a new isolated directory and verify it; never replace production."""
     if output_directory.exists():

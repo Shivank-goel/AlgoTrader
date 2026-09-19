@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC
 from pathlib import Path
 
 import click
@@ -59,6 +60,7 @@ def status() -> None:
             payload["recorded_ticks"] = journal.db.execute("SELECT COUNT(*) FROM events WHERE kind='tick'").fetchone()[0]
             payload["paper_fills"] = journal.db.execute("SELECT COUNT(*) FROM fills").fetchone()[0]
             payload["paper_valuation"] = journal.get("paper_valuation")
+            payload["strategy_lab"] = journal.get("strategy_lab_status")
         finally:
             journal.close()
     click.echo(json.dumps(payload, indent=2))
@@ -80,14 +82,18 @@ def halt(reason: str) -> None:
 @click.option("--output", type=click.Path(path_type=Path))
 def backup(output: Path | None) -> None:
     """Create an integrity-checked SQLite backup; never overwrite a backup."""
-    from datetime import datetime, timezone
-    from src.fyers.operations import backup_database, verify_backup
+    from datetime import datetime
+
+    from src.fyers.operations import backup_database, prune_backups, verify_backup
     config = RuntimeConfig.load()
     destination = output or (ROOT / config.backup_directory /
-                             f"runtime-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.sqlite3")
+                             f"runtime-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.sqlite3")
     try:
         backup_database(ROOT / config.database, destination)
-        click.echo(json.dumps({"path": str(destination), **verify_backup(destination)}, indent=2))
+        report = {"path": str(destination), **verify_backup(destination)}
+        if output is None:
+            report["pruned"] = prune_backups(destination.parent, retain=config.backup_retention_count)
+        click.echo(json.dumps(report, indent=2))
     except ValueError as exc:
         raise click.ClickException(str(exc)) from None
 

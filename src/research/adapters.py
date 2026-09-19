@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import timezone
+from datetime import UTC
 from pathlib import Path
 
 import pandas as pd
 
 from src.backtest.costs import CostModel
+from src.backtest.nse_regime_backtest import run_regime_backtest
 from src.backtest.portfolio_backtest import PortfolioBacktester
+from src.fyers.costs import FyersCosts
 from src.research.models import ExperimentOutput, ExperimentSpec
 from src.research.validation import strategy_integrity
+from src.strategies.nse_regime_selector import (
+    FrozenFamilyEvidence,
+    RegimeAwareSelector,
+    SelectorConfig,
+    StrategyFamily,
+)
 from src.strategies.portfolio import PricePanel
 from src.strategies.xs_momentum import CrossSectionalMomentum
 
@@ -73,12 +81,41 @@ def csv_xs_momentum(spec: ExperimentSpec, root: Path) -> ExperimentOutput:
         if later >= len(panel.close):
             raise ValueError("Baseline extends beyond registered data")
         baseline.append(float((panel.close.iloc[later] / panel.close.iloc[location] - 1).mean()))
-    timestamps = [timestamp.to_pydatetime().astimezone(timezone.utc) for timestamp in result.timestamps]
+    timestamps = [timestamp.to_pydatetime().astimezone(UTC) for timestamp in result.timestamps]
     return ExperimentOutput(timestamps=timestamps, net_returns=result.period_returns,
                             baseline_returns=baseline, turnover=result.period_turnover)
 
 
-ADAPTERS = {"csv_xs_momentum": csv_xs_momentum}
+def csv_nse_regime(spec: ExperimentSpec, root: Path) -> ExperimentOutput:
+    """Registered daily close artifacts through whole-share FYERS economics."""
+    data_files = spec.parameters.get("data_files")
+    if not isinstance(data_files, dict) or set(data_files) != set(spec.universe):
+        raise ValueError("parameters.data_files must map every universe symbol")
+    frames = {}
+    for symbol, relative in data_files.items():
+        if not isinstance(relative, str) or relative not in spec.artifacts:
+            raise ValueError("Every research data file must be a registered artifact")
+        path = (root / relative).resolve()
+        if not path.is_relative_to(root.resolve()):
+            raise ValueError("Research data file escapes root")
+        frames[symbol] = _csv_frame(path)
+    closes = pd.DataFrame({symbol: frame["close"] for symbol, frame in frames.items()}).dropna()
+    closes = closes.loc[pd.Timestamp(spec.start).tz_convert("UTC"):pd.Timestamp(spec.end).tz_convert("UTC")]
+    family = StrategyFamily(spec.parameters.get("family"))
+    selector = RegimeAwareSelector(SelectorConfig(
+        min_regime_confidence=float(spec.parameters.get("min_regime_confidence", .60)),
+        top_n=int(spec.parameters.get("top_n", 5)), capital_inr=10000, max_order_inr=2000,
+        evidence=[FrozenFamilyEvidence(family=item, lower_confidence_bound=0, qualified=False)
+                  for item in StrategyFamily]))
+    output = run_regime_backtest(
+        closes, selector, family,
+        rebalance_bars=int(spec.parameters.get("rebalance_bars", 5)),
+        half_spread_bps=float(spec.slippage.get("half_spread_bps", 0)), costs=FyersCosts.load())
+    return ExperimentOutput(timestamps=output.timestamps, net_returns=output.net_returns,
+                            baseline_returns=output.baseline_returns, turnover=output.turnover)
+
+
+ADAPTERS = {"csv_xs_momentum": csv_xs_momentum, "csv_nse_regime": csv_nse_regime}
 
 
 def run_adapter(name: str, spec: ExperimentSpec, root: Path) -> ExperimentOutput:

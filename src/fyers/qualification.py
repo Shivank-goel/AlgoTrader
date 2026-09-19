@@ -51,8 +51,14 @@ def qualification(path: Path, trials_path: Path) -> tuple[bool, str]:
             return False, "missing registered FYERS trial or data/cost review"
         if not isinstance(evidence.get("strategy"), str) or not evidence["strategy"]:
             return False, "missing strategy identity"
+        forward = evidence.get("forward_evidence")
+        if (not isinstance(forward, dict) or forward.get("accepted") is not True
+                or type(forward.get("observations")) is not int or forward["observations"] < 20
+                or not isinstance(forward.get("selector_sha256"), str)
+                or len(forward["selector_sha256"]) != 64):
+            return False, "forward evidence has not been reviewed and accepted"
         returns = evidence["net_returns"]
-        if not isinstance(returns, list) or len(returns) < 100 or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in returns):
+        if not isinstance(returns, list) or len(returns) < 100 or any(isinstance(x, bool) or not isinstance(x, int | float) or not math.isfinite(x) for x in returns):
             return False, "need at least 100 finite net observations"
         sharpes = [float(t["sharpe"]) for t in trials]
         if len(sharpes) < 2 or not all(math.isfinite(x) for x in sharpes):
