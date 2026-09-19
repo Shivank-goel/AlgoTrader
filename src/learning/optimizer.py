@@ -72,7 +72,7 @@ class WalkForwardOptimizer:
                 oos_score,
                 strategy_name,
             )
-            return self._previous_params.get(strategy_name, best_params)
+            return self._previous_params.get(strategy_name, {})
 
         prev = self._previous_params.get(strategy_name, {})
         if prev and not self._params_stable(prev, best_params):

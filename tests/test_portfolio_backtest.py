@@ -185,6 +185,33 @@ def test_results_are_deterministic():
     ).to_dict()
 
 
+def test_backtester_never_exposes_future_rows():
+    class Inspector(PortfolioStrategy):
+        def min_history(self):
+            return 1
+
+        def target_weights(self, panel, i):
+            assert len(panel.close) == len(panel.returns) == i + 1
+            return pd.Series(0., index=panel.symbols)
+
+    PortfolioBacktester().run(Inspector(), _panel(n=30), hold_bars=2)
+
+
+def test_liquidation_fee_updates_drawdown_and_timestamps():
+    class Exit(PortfolioStrategy):
+        def min_history(self):
+            return 1
+
+        def target_weights(self, panel, i):
+            return pd.Series({"A": 1. if i == 1 else 0.})
+
+    close = pd.DataFrame({"A": [100.] * 5}, index=pd.date_range("2020-01-01", periods=5))
+    result = PortfolioBacktester().run(Exit(), PricePanel(close, close.pct_change()), hold_bars=1)
+    assert len(result.timestamps) == len(result.period_returns) == 2
+    equity = np.prod(1 + np.asarray(result.period_returns))
+    assert result.max_drawdown_pct == pytest.approx((1 - equity) * 100)
+
+
 def test_too_little_data_returns_an_empty_result():
     small = PricePanel(
         close=_panel(n=50).close, returns=_panel(n=50).returns

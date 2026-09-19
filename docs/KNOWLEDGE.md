@@ -16,14 +16,31 @@ this file is the answer, not the journey.
   cited source, not independently verified · `[inferred]` reasoning from other facts ·
   `[assumed]` load-bearing but unverified — these are the dangerous ones.
 
-Last updated: 2026-08-25 · Trials recorded: **198** (see `data/trials.json`)
+Last updated: 2026-09-18 · Trials recorded: **206** (verified against `data/trials.json`; previous header was stale)
+
+Integration status (2026-09-18): FYERS login, REST data, public instrument
+resolution and SDK streaming have been verified. A 15-second stream check recorded
+two SBIN/INFY ticks; neither had a usable two-sided book. `main.py fyers` now
+provides recording, readiness, cost estimates, halt and gated paper commands.
+The paper ledger and disabled limit-order transport have mocked tests. No live
+order was placed; no strategy qualified. Production position reconciliation,
+order-update integration and market-hours deployment drills remain outstanding.
+See `docs/FYERS_OPERATIONS.md` for exact capabilities and blockers.
+Remaining work is planned in `docs/IMPLEMENTATION_PLAN.md`; that document describes
+future work and does not change the evidence or deployment status recorded here.
+P0 paper-risk update: validated reductions remain available under entry halts;
+valuation now runs independently of orders and preserves prior-day equity, P&L
+and fee accounting across restart. Regression tests use synthetic data; no new
+strategy evidence or live order was generated.
 
 ---
 
 ## 0. CONCLUSION (2026-08-25)
 
-**There is no tradeable edge at ₹10,000 that beats buying a momentum index fund.**
-That is the answer, reached after ~200 tested hypotheses across two markets.
+**None of the tested candidates has qualified for deployment at ₹10,000.**
+The historical research below used the then-current cost assumptions. It does
+not prove that no possible strategy can work, and is not a FYERS net-return
+validation. Preserve the negative results without treating them as a universal claim.
 
 - Every **active** structure is closed: positional long/short is impossible (K-12), intraday
   long/short sits below a cost floor it cannot amortise (K-28, K-44).
@@ -60,7 +77,7 @@ active strategies at **₹5 lakh+** (K-46), where the intraday cost floor stops 
 | ID | Fact | Confidence |
 |---|---|---|
 | K-01 | Capital is **₹10,000**, growing only from profits. Not the user's income; patient. | given |
-| K-02 | Broker is **Dhan** (free API). Zero brokerage on equity delivery; `min(₹20, 0.03%)` per order intraday. | [external] |
+| K-02 | User's broker and selected NSE target is **FYERS**. `main.py fyers` runs NSE observation and qualified paper intents; `main.py run` remains the Delta engine (now defaults to paper). FYERS live transport is disabled and has no production enable command. Dhan is legacy/optional. | given; `src/fyers/`, `config/settings.yaml` |
 | K-03 | Goal is a system that trades, adapts and learns, running **multiple** strategies over time — not one bet. | given |
 | K-04 | The user codes and understands maths. Explanations should be quantitative, not simplified. | given |
 
@@ -78,6 +95,10 @@ active strategies at **₹5 lakh+** (K-46), where the intraday cost floor stops 
 | K-16 | Delta Exchange India lists only **8 liquid perps**, and just BTC/ETH/SOL/XRP have real depth (BMTUSD shows $48M turnover on $236k OI — churn, not liquidity). | [measured] |
 
 ## 3. Costs — all measured, all reproducible
+
+The NSE measurements below use historical **Dhan** assumptions. They are retained
+for reproducibility, not validated FYERS costs. FYERS brokerage, DP charges and
+applicable taxes must be verified before qualifying a strategy for FYERS.
 
 | ID | Fact | Confidence |
 |---|---|---|
@@ -153,7 +174,7 @@ higher. Still the only case where "no edge" has resolved into "edge above ₹X".
 
 A strategy ships to paper **only if all four hold**:
 
-1. **Deflated Sharpe > 0.95** against the *full* trial count (currently 162 and rising)
+1. **Deflated Sharpe > 0.95** against the *full* trial count (206 as verified 2026-09-18; always read the registry)
 2. **Positive in both halves** of the sample
 3. **≥ 100 observations**
 4. **Net of measured costs**
@@ -202,8 +223,8 @@ universes) — not care or attention.
 | ID | Question | Why it matters | Blocked on |
 |---|---|---|---|
 | K-90 | Survivorship-free NSE universe | **SOLVED (2026-08-18)** by K-85 — daily bhavcopy, 4,064 days, 15 years, no credentials. Kept here rather than deleted so the reference stays resolvable. | — |
-| K-91 | Real bid-ask spread on NSE names | Decides K-44/K-46 — whether the intraday signal is tradeable at scale | Quote/tick data from Dhan |
-| K-92 | Does a per-order **minimum** fee exist on Dhan? | On ₹1,000–10,000 orders an absolute floor would multiply effective bps and invalidate K-21 | One live ₹500 round trip |
+| K-91 | Real bid-ask spread on NSE names | Decides K-44/K-46 — whether the intraday signal is tradeable at scale | Recorder implemented; representative market-hours two-sided quotes still needed |
+| K-92 | Does the FYERS cost estimate match actual account charges and rounding? | Published tariff is encoded in `config/fyers_costs.yaml`: intraday min(₹20, 0.03%), delivery min(₹20, 0.3%), delivery DP ₹12.5 + GST per ISIN/day. Existing Dhan results are not FYERS returns. | [external] [FYERS charges](https://fyers.in/charges-list), contract-note reconciliation pending |
 | K-93 | Does K-44's signal survive at lower turnover? | Fees scale with turnover (K-25); a weekly version might clear costs at ₹10,000 | Nothing — testable now |
 | K-95 | **Should the DSR trial count be family-scoped?** The pass mark says "full trial count". For K-47 that is 198, of which 120 are crypto trials on a different market — giving DSR 0.0002 versus 0.5897 scoped to the 36 NSE momentum trials. Bailey/López de Prado deflate for trials *within a search*. **Not urgent: K-47 fails either way**, so nothing currently hinges on it. Decide before a result sits between the two. | Deliberate, recorded decision — never a silent change after seeing a result |
 | K-94 | Is the illiquid-momentum premium (19.43% vs 8.51% CAGR) reproducible? | The strongest external claim we have, and small capital is *advantaged* by it | K-90, plus a universe wider than F&O names |
@@ -221,3 +242,11 @@ Treat as hypotheses, not facts, until reproduced here.
   cross-section. Our 4–6 name universe is far too thin to resolve this (K-16).
 - `[external]` Short-term reversal is among the most robustly documented equity anomalies
   globally.
+
+## 12. Deployment facts
+
+| ID | Fact | Confidence |
+|---|---|---|
+| K-96 | Dhan's v2 order API accepts a user-generated `correlationId` (maximum 30 permitted characters) and exposes order lookup by that ID. Order placement/modification/cancellation requires static-IP allowlisting; individual access tokens expire after 24 hours. The Dhan gateway must resolve an ambiguous order request by correlation ID before any retry. | [external] [Dhan orders](https://dhanhq.co/docs/v2/orders/), [authentication](https://dhanhq.co/docs/v2/authentication/) |
+| K-97 | SEBI's retail API-algo framework applies to all stock brokers from **1 Apr 2026**. Dhan documents a 10 order/second order-API limit. Deployment must include the broker/exchange controls and rate limiting; this is not a strategy concern. | [external] [SEBI circular](https://www.sebi.gov.in/sebi_data/attachdocs/sep-2025/1759232056254.pdf), [Dhan releases](https://dhanhq.co/docs/v2/releases/) |
+| K-98 | Dhan trading APIs are free, but Dhan's current public pricing lists its real-time/historical Data API at ₹499/month. FYERS states that its trading, historical, quote, and market-data APIs are free for its clients. Neither removes statutory transaction costs or retail-algo controls. | [external] [Dhan authentication](https://dhanhq.co/docs/v2/authentication/), [Dhan pricing](https://dhanhq.co/trading-apis), [FYERS fees](https://support.fyers.in/portal/en/kb/articles/does-fyers-charge-any-subscription-fees-for-trading-api) |

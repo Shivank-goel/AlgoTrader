@@ -133,8 +133,9 @@ class TradingEngine:
             testnet=testnet,
         )
 
-        trading_mode = self.settings.get("trading", {}).get("mode", "live")
-        paper_mode = trading_mode == "paper"
+        trading_mode = self.settings.get("trading", {}).get("mode", "paper")
+        from src.risk.deployment import paper_execution
+        paper_mode = paper_execution(trading_mode)
         # One cost model shared by paper execution and the backtester, so a
         # paper result is comparable to a backtested one.
         self.cost_model = CostModel.from_config(self.risk_config)

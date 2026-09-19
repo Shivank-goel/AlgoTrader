@@ -8,8 +8,16 @@ let selectedSymbol = null;
 let heartbeatTimer = null;
 let dataTimer = null;
 let universeTimer = null;
+let controlToken = null; // Memory only; never persist credentials in browser storage.
 
 async function fetchJSON(url, options = {}) {
+    if (!['GET', 'HEAD', 'OPTIONS'].includes((options.method || 'GET').toUpperCase())) {
+        if (!controlToken) controlToken = window.prompt('Dashboard control token:');
+        if (!controlToken) throw new Error('Control action cancelled');
+        const headers = new Headers(options.headers || {});
+        headers.set('Authorization', `Bearer ${controlToken}`);
+        options = { ...options, headers };
+    }
     let resp;
     try {
         resp = await fetch(url, options);
@@ -17,9 +25,10 @@ async function fetchJSON(url, options = {}) {
         throw new Error('Network error: ' + networkErr.message);
     }
     if (!resp.ok) {
+        if (resp.status === 401) controlToken = null;
         const text = await resp.text().catch(() => '');
         let detail = resp.statusText;
-        try { detail = JSON.parse(text).detail || detail; } catch (_) {}
+        try { const body = JSON.parse(text); detail = body.error || body.detail || detail; } catch (_) {}
         throw new Error(`${resp.status}: ${detail}`);
     }
     return resp.json();

@@ -14,6 +14,9 @@ import yaml
 from rich.console import Console
 from rich.table import Table
 
+from src.fyers.cli import fyers
+from src.research.cli import research
+
 console = Console()
 
 DEFAULT_LOG_FILE = "logs/trader.log"
@@ -462,6 +465,9 @@ def reconcile(ctx, accept):
         )
         console.print("  python main.py reconcile --accept")
 
+
+cli.add_command(fyers)
+cli.add_command(research)
 
 if __name__ == "__main__":
     cli()

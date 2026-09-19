@@ -1,0 +1,18 @@
+symbols: [NSE:SBIN-EQ, NSE:INFY-EQ]
+master_url: https://public.fyers.in/sym_details/NSE_CM_sym_master.json
+database: data/fyers/runtime.sqlite3
+sdk_logs: logs/fyers
+stale_seconds: 30
+queue_size: 10000
+reconnect_attempts: 10
+reconcile_seconds: 60
+capital_inr: 10000
+max_order_inr: 2000
+max_daily_loss_inr: 200
+slippage_bps: 2
+# No strategy is qualified. Never add a candidate merely to enable trading.
+qualification_file: data/fyers/qualification.json
+trials_file: data/trials.json
+backup_directory: data/fyers/backups
+backup_max_age_seconds: 172800
+alert_after_seconds: 300

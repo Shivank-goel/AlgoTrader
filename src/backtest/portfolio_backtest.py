@@ -39,6 +39,7 @@ class PortfolioResult:
     t_stat: float = 0.0
     avg_turnover: float = 0.0
     period_returns: list[float] = field(default_factory=list)
+    period_turnover: list[float] = field(default_factory=list)
     timestamps: list[pd.Timestamp] = field(default_factory=list)
     params: dict = field(default_factory=dict)
 
@@ -85,6 +86,8 @@ class PortfolioBacktester:
         hold_bars: int,
         start: Optional[int] = None,
     ) -> PortfolioResult:
+        if type(hold_bars) is not int or hold_bars <= 0:
+            raise ValueError("hold_bars must be a positive integer")
         warmup = max(strategy.min_history(), 1)
         start = warmup if start is None else max(start, warmup)
 
@@ -106,7 +109,9 @@ class PortfolioBacktester:
         turnovers: list[float] = []
 
         for i in range(start, len(panel) - hold_bars, hold_bars):
-            weights = strategy.target_weights(panel, i)
+            visible = PricePanel(close=panel.close.iloc[:i + 1].copy(),
+                                 returns=panel.returns.iloc[:i + 1].copy())
+            weights = strategy.target_weights(visible, i)
             if weights is None or weights.abs().sum() == 0:
                 # Flat book still costs whatever it takes to unwind.
                 turnover = float(previous.abs().sum())
@@ -115,6 +120,9 @@ class PortfolioBacktester:
                     nets.append(-cost)
                     cost_total += cost * 100
                     turnovers.append(turnover)
+                    result.timestamps.append(panel.close.index[i])
+                    equity *= 1.0 - cost
+                    max_dd = max(max_dd, (peak - equity) / peak)
                 previous = pd.Series(0.0, index=panel.close.columns)
                 continue
 
@@ -150,6 +158,7 @@ class PortfolioBacktester:
         periods_per_year = self.bars_per_year / hold_bars
 
         result.period_returns = nets
+        result.period_turnover = turnovers
         result.rebalances = len(arr)
         result.gross_return_pct = gross_total
         result.costs_pct = cost_total

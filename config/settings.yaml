@@ -5,7 +5,7 @@ exchange:
   testnet: true
 
 trading:
-  mode: live  # paper = simulated only | live = real orders (demo or prod per engine mode)
+  mode: paper  # Explicitly opt in to real Delta orders; FYERS uses main.py fyers.
   pairs: []   # populated by universe scanner on start
   primary_timeframe: 15m
   candle_interval_seconds: 900

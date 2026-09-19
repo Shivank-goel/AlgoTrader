@@ -26,10 +26,11 @@ PARAM_GRIDS = {
 
 
 def simple_backtest(strategy_name: str, df, params: dict) -> float:
-    return 0.5
+    raise NotImplementedError("Placeholder scores are not research evidence; use src.research.runner")
 
 
 async def run_optimization(symbol: str, is_window: int, oos_window: int) -> None:
+    raise RuntimeError("Legacy unregistered optimizer disabled; use a frozen experiment and real backtest")
     engine = TradingEngine()
     optimizer = WalkForwardOptimizer(
         engine.strategy_config,

@@ -1,608 +1,142 @@
-# Adaptive Crypto Trading System — Implementation Plan
+# FYERS/NSE implementation roadmap
 
-> A professional-grade, self-improving algorithmic trading system for Delta Exchange India that detects market regimes, selects optimal strategies, manages risk like a pro trader, and continuously learns from its own performance.
+Updated: 2026-09-19. This replaces the original Delta build proposal.
+Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Current implementation/verification: [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md).
+Operating instructions: [docs/FYERS_OPERATIONS.md](docs/FYERS_OPERATIONS.md).
 
----
+## Direction and acceptance
 
-## Architecture Overview
+Build an auditable research → validation → shadow → qualification → execution
+platform for a personal FYERS/NSE trading app, not a multi-user product. Delta
+remains a separate existing crypto runtime. Product reliability and demonstrated
+net profitability are separate outcomes; better infrastructure cannot guarantee profits.
+Preserve the 206 historical trial rows and their original broker/cost provenance.
+No strategy currently meets deployment criteria at ₹10,000.
 
-```mermaid
-graph TB
-    subgraph Data Layer
-        WS[WebSocket Client<br/>Real-time Ticks/Candles]
-        REST[REST Data Fetcher<br/>Historical OHLCV]
-        IND[Indicator Engine<br/>pandas-ta · 30+ indicators]
-    end
-    
-    subgraph Brain
-        RD[Regime Detector<br/>ADX · BBW · ATR · Volume]
-        SS[Strategy Selector<br/>Regime → Best Strategy]
-        STRATS[Strategy Pool<br/>10 Strategies · 4 Categories]
-        SIG[Signal Generator<br/>Entry/Exit/Direction]
-    end
-    
-    subgraph Risk & Execution
-        RM[Risk Manager<br/>Position Sizing · Stops · Limits]
-        CB[Circuit Breaker<br/>Drawdown · Daily Loss · Kill Switch]
-        OM[Order Manager<br/>Market/Limit/Bracket Orders]
-        EX[Exchange Client<br/>Delta Exchange API]
-    end
-    
-    subgraph Learning
-        PT[Performance Tracker<br/>Sharpe · Sortino · Win Rate]
-        WFO[Walk-Forward Optimizer<br/>Parameter Tuning]
-        PA[Parameter Adapter<br/>Regime-specific Params]
-    end
-    
-    subgraph Interface
-        DASH[Web Dashboard<br/>FastAPI + Lightweight Charts]
-        NOTIF[Notifications<br/>Telegram Bot]
-        LOG[Trade Journal<br/>SQLite Database]
-    end
-    
-    WS --> IND
-    REST --> IND
-    IND --> RD
-    RD --> SS
-    SS --> STRATS
-    STRATS --> SIG
-    SIG --> RM
-    RM --> CB
-    CB --> OM
-    OM --> EX
-    
-    EX --> PT
-    PT --> WFO
-    WFO --> PA
-    PA --> SS
-    
-    EX --> DASH
-    OM --> NOTIF
-    PT --> LOG
-```
+Keep K-60 unchanged: DSR > 0.95 against the full trial count, positive both halves,
+at least 100 observations, net of measured costs. Live stays disabled pending
+strategy evidence, operational readiness and explicit deployment authorization.
 
----
+## Completed research-integrity batch
 
-## Target Platform
+- Public atomic `TrialsRegistry.record_once()`: serialize identity checks and
+  appends with the normal registry lock; retry identical results, reject conflicts.
+- Validate registered → started → result → published transitions and result schemas.
+- Block a campaign with unfinished or unpublished work; expose research status.
+- Resolve abandoned attempts explicitly, preserving operator/reason and counting
+  the failure without rerunning a backtest. Refuse resolution while a worker holds
+  the execution lock.
+- Bind publication to specification, result and exact trial-snapshot hashes.
+  Reports are immutable dated snapshots; report views identify stale evidence.
+- Add schema version 2 without rewriting stored evidence. Audit inconsistent
+  legacy records and validate legacy imports from one captured byte snapshot.
+- Regression tests cover concurrency, crashes, invalid evidence and preservation.
 
-| Detail | Value |
+Research recovery commands and compatibility notes:
+[docs/RESEARCH_PROCESS.md](docs/RESEARCH_PROCESS.md).
+
+## Research references
+
+Reviewed 2026-09-19. These are engineering and evaluation references, not evidence
+that a strategy will be profitable. Adopt patterns incrementally; do not replace
+the repository or add these platforms as dependencies.
+
+| Reference | Pattern to apply |
 |---|---|
-| **Exchange** | Delta Exchange India |
-| **API** | REST v2 + WebSocket |
-| **Base URL (Prod)** | `https://api.india.delta.exchange` |
-| **Base URL (Testnet)** | `https://cdn-ind.testnet.deltaex.org` |
-| **Python SDK** | `delta-rest-client` + CCXT (`delta`) |
-| **Products** | Perpetual Futures (BTC, ETH, SOL, XRP, etc.) — INR-settled |
-| **Leverage** | Up to 200x (we'll cap at 5-10x for safety) |
-| **Fees** | 0.02% maker / 0.05% taker + 18% GST |
-| **Testnet** | Full sandbox at `testnet.delta.exchange` |
-
----
-
-## User Review Required
-
-> [!IMPORTANT]
-> **Exchange Account**: You need a Delta Exchange India account with API keys. The system will start on **testnet** (paper trading) before going live. No real money is at risk during development.
-
-> [!WARNING]
-> **Risk Disclosure**: Algorithmic crypto trading involves substantial risk. This system includes robust risk management (1-2% per trade, daily loss limits, circuit breakers), but no system guarantees profits. The system defaults to **conservative settings** — you can tune aggressiveness later.
-
-> [!IMPORTANT]
-> **Initial Deployment**: The system runs as a Python process on your local machine or a VPS. For 24/7 uninterrupted operation in production, a VPS (e.g., DigitalOcean $12/mo) or cloud server is recommended.
-
----
-
-## Open Questions
-
-> [!IMPORTANT]
-> 1. **Starting Capital**: What is your approximate starting balance? This affects position sizing defaults and minimum trade requirements.
-> 2. **Risk Appetite**: Conservative (1% per trade, max 10% drawdown), Moderate (2%, max 15%), or Aggressive (3%, max 20%)?
-> 3. **Trading Pairs**: Start with just BTC/USDT perpetual, or also include ETH, SOL, XRP?
-> 4. **Notifications**: Do you want Telegram alerts for trades? If so, do you have a Telegram bot token?
-> 5. **Hosting**: Run locally on your Mac during development, or immediately deploy to a VPS?
-
-For now, the plan assumes: **Moderate risk**, **BTC + ETH perpetuals**, **Telegram alerts**, **local development first**.
-
----
-
-## Proposed Changes
-
-The project will be created at `/Users/shivankgoel/.gemini/antigravity/scratch/crypto-trader/`
-
-### Project Structure
-
-```
-crypto-trader/
-├── config/
-│   ├── settings.yaml              # Master config (exchange, mode, pairs)
-│   ├── strategies.yaml            # Strategy parameters per regime
-│   └── risk.yaml                  # Risk management parameters
-├── src/
-│   ├── __init__.py
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── engine.py              # Main trading engine (event loop)
-│   │   ├── events.py              # Event types and event bus
-│   │   └── models.py              # Data models (Signal, Order, Position, etc.)
-│   ├── data/
-│   │   ├── __init__.py
-│   │   ├── manager.py             # Historical + real-time data management
-│   │   ├── websocket_client.py    # Delta Exchange WebSocket client
-│   │   └── indicators.py          # Technical indicator calculations
-│   ├── market/
-│   │   ├── __init__.py
-│   │   ├── regime.py              # Market regime detector
-│   │   └── state.py               # Market state snapshot
-│   ├── strategies/
-│   │   ├── __init__.py
-│   │   ├── base.py                # Abstract base strategy
-│   │   ├── selector.py            # Meta-strategy: picks best strategy
-│   │   ├── trend/
-│   │   │   ├── __init__.py
-│   │   │   ├── ema_crossover.py   # EMA crossover strategy
-│   │   │   ├── supertrend.py      # Supertrend strategy
-│   │   │   └── donchian.py        # Donchian channel breakout
-│   │   ├── mean_reversion/
-│   │   │   ├── __init__.py
-│   │   │   ├── rsi_reversion.py   # RSI mean-reversion
-│   │   │   └── bollinger.py       # Bollinger Band mean-reversion
-│   │   ├── momentum/
-│   │   │   ├── __init__.py
-│   │   │   └── macd.py            # MACD momentum strategy
-│   │   └── breakout/
-│   │       ├── __init__.py
-│   │       └── volume_breakout.py # Volume-confirmed breakout
-│   ├── risk/
-│   │   ├── __init__.py
-│   │   ├── manager.py             # Risk manager (orchestrates all risk)
-│   │   ├── position_sizer.py      # Position sizing (fractional, Kelly, ATR)
-│   │   └── circuit_breaker.py     # Kill switches and circuit breakers
-│   ├── execution/
-│   │   ├── __init__.py
-│   │   ├── exchange.py            # Delta Exchange API wrapper
-│   │   └── order_manager.py       # Order lifecycle management
-│   ├── portfolio/
-│   │   ├── __init__.py
-│   │   ├── manager.py             # Portfolio state and tracking
-│   │   └── journal.py             # Trade journal (SQLite)
-│   ├── learning/
-│   │   ├── __init__.py
-│   │   ├── scorer.py              # Strategy performance scoring
-│   │   ├── optimizer.py           # Walk-forward optimization
-│   │   └── adapter.py             # Adaptive parameter tuning
-│   ├── dashboard/
-│   │   ├── __init__.py
-│   │   ├── app.py                 # FastAPI web dashboard
-│   │   ├── static/
-│   │   │   ├── css/
-│   │   │   │   └── dashboard.css  # Dashboard styling
-│   │   │   └── js/
-│   │   │       └── dashboard.js   # Lightweight Charts + live data
-│   │   └── templates/
-│   │       └── index.html         # Dashboard HTML
-│   └── notifications/
-│       ├── __init__.py
-│       └── telegram.py            # Telegram bot notifications
-├── tests/
-│   ├── __init__.py
-│   ├── test_indicators.py
-│   ├── test_strategies.py
-│   ├── test_risk.py
-│   └── test_regime.py
-├── scripts/
-│   ├── backtest.py                # Run backtests
-│   └── optimize.py                # Run walk-forward optimization
-├── data/                          # Local data cache (auto-created)
-├── logs/                          # Trading logs (auto-created)
-├── .env.example                   # Environment variables template
-├── requirements.txt               # Python dependencies
-├── main.py                        # Entry point
-└── README.md                      # Documentation
-```
-
----
-
-### Phase 1 — Foundation (Core Infrastructure)
-
-#### [NEW] `config/settings.yaml`
-Master configuration file:
-- Exchange connection (API URL, testnet vs production)
-- Trading pairs and timeframes (default: BTC/USDT 15m + 1h)
-- Operating mode (paper/live)
-- Logging level
-
-#### [NEW] `config/risk.yaml`
-Risk parameters:
-- Max risk per trade: 1-2% of equity
-- Max daily loss: 5% → halt trading
-- Max drawdown: 15% → pause and alert
-- Max open positions: 3
-- Max leverage: 5x (even though 200x is available)
-- Max portfolio heat: 15%
-
-#### [NEW] `config/strategies.yaml`
-Strategy parameters per regime:
-- Each strategy's indicator settings for each market regime
-- Default parameters and regime-specific overrides
-- Strategy enable/disable flags
-
-#### [NEW] `src/core/engine.py`
-The main trading engine — an async event loop that:
-1. Initializes all components (data, strategies, risk, execution)
-2. Runs on a configurable interval (default: every new 15-minute candle)
-3. Pipeline per tick: `Fetch Data → Compute Indicators → Detect Regime → Generate Signals → Risk Check → Execute Orders → Log`
-4. Graceful shutdown with position safety checks
-5. Heartbeat monitoring
-
-#### [NEW] `src/core/events.py`
-Event-driven architecture with typed events:
-- `MarketDataEvent` — new candle/tick received
-- `SignalEvent` — strategy generates entry/exit signal
-- `OrderEvent` — order to be placed
-- `FillEvent` — order was filled
-- `RegimeChangeEvent` — market regime changed
-- Simple pub/sub event bus using Python `asyncio.Queue`
-
-#### [NEW] `src/core/models.py`
-Pydantic data models:
-- `Signal` (symbol, direction, strategy_name, confidence, timestamp)
-- `Order` (symbol, side, type, size, price, stop_loss, take_profit)
-- `Position` (symbol, side, entry_price, size, unrealized_pnl)
-- `TradeRecord` (full trade lifecycle for journaling)
-- `MarketState` (regime, indicators, prices)
-
-#### [NEW] `src/execution/exchange.py`
-Delta Exchange API wrapper using both `delta-rest-client` and direct REST:
-- Authentication (HMAC-SHA256)
-- Place/cancel/modify orders
-- Fetch positions and balances
-- Fetch market data (candles, ticker, orderbook)
-- WebSocket connection for real-time data
-- Testnet/production switching via config
-- Retry logic with exponential backoff
-- Rate limit awareness
-
-#### [NEW] `src/execution/order_manager.py`
-Order lifecycle management:
-- Convert signals into orders with proper sizing
-- Bracket orders (entry + stop-loss + take-profit)
-- Order state tracking (pending, filled, cancelled, rejected)
-- Partial fill handling
-- Slippage monitoring
-
----
-
-### Phase 2 — Market Intelligence
-
-#### [NEW] `src/data/manager.py`
-Data management:
-- Fetch historical OHLCV candles from Delta Exchange REST API
-- Cache data locally in Parquet files for fast loading
-- Multi-timeframe support (15m for signals, 1h/4h for trend context)
-- Data validation and gap detection
-
-#### [NEW] `src/data/websocket_client.py`
-Real-time data via WebSocket:
-- Subscribe to candlestick, ticker, and trade channels
-- Auto-reconnection with exponential backoff
-- Heartbeat/ping-pong handling
-- Real-time candle aggregation
-
-#### [NEW] `src/data/indicators.py`
-Technical indicator engine using `pandas-ta`:
-- **Trend**: EMA (9, 21, 50, 200), SMA, Supertrend, Ichimoku, Donchian Channels
-- **Momentum**: RSI, MACD, ROC, Stochastic
-- **Volatility**: ATR, Bollinger Bands, Bollinger Band Width
-- **Volume**: OBV, Volume SMA, Volume Ratio, VWAP
-- **Trend Strength**: ADX, DI+/DI-
-- Computed on multiple timeframes and cached
-
-#### [NEW] `src/market/regime.py`
-Market regime detector — the "brain's eye":
-
-| Indicator | Trending | Ranging | Volatile | Quiet |
-|---|---|---|---|---|
-| ADX(14) | > 25 | < 20 | Any | < 15 |
-| BBW Percentile | Expanding | Stable | > 80th | < 20th |
-| ATR % of Price | Rising | Flat | High (> 2x avg) | Low |
-| Volume Ratio | > 1.0 | < 0.8 | Spiky (> 1.5) | < 0.5 |
-
-- Composite scoring: weighted vote across indicators → regime classification
-- Regime confidence score (0-1)
-- Hysteresis: require sustained signal before switching regimes (avoid thrashing)
-- Regime history tracking for pattern analysis
-
-#### [NEW] `src/market/state.py`
-Market state snapshot — a frozen view of everything the strategies need:
-- Current regime + confidence
-- All indicator values at current bar
-- Multi-timeframe context (15m, 1h, 4h trends)
-- Recent price action summary (support/resistance levels)
-
----
-
-### Phase 3 — Strategy Pool (7 Strategies Across 4 Categories)
-
-#### [NEW] `src/strategies/base.py`
-Abstract base strategy class:
-```python
-class BaseStrategy(ABC):
-    def analyze(self, market_state: MarketState) -> Optional[Signal]
-    def get_stop_loss(self, entry_price, side) -> float
-    def get_take_profit(self, entry_price, side) -> float
-    def get_preferred_regimes(self) -> List[Regime]
-    def get_confidence(self) -> float  # 0-1 signal quality
-```
-
-#### [NEW] `src/strategies/trend/ema_crossover.py`
-**EMA Crossover** — Bread-and-butter trend following:
-- Fast/slow EMA pairs: 9/21 (aggressive), 12/26 (balanced), 20/50 (conservative)
-- Entry: Fast crosses slow in direction of 200 EMA trend
-- Exit: Opposite crossover or trailing stop (2× ATR)
-- Filter: ADX > 25, volume confirmation
-- Best regime: **Trending**
-
-#### [NEW] `src/strategies/trend/supertrend.py`
-**Supertrend** — Clean trend signals with built-in stops:
-- Parameters: ATR(10), Multiplier 3.0 (swing) / 2.0 (scalp)
-- Entry: Price closes above/below Supertrend line
-- Stop: Supertrend line itself (dynamic trailing stop)
-- Filter: 200 EMA alignment, RSI not extreme (30-70)
-- Best regime: **Trending**
-
-#### [NEW] `src/strategies/trend/donchian.py`
-**Donchian Channel Breakout** — Classic turtle-trader approach:
-- Entry channel: 20-period high/low breakout
-- Exit channel: 10-period (tighter) for exits
-- Volume filter: breakout bar volume > 1.5× average
-- Best regime: **Trending** (transitioning from quiet)
-
-#### [NEW] `src/strategies/mean_reversion/rsi_reversion.py`
-**RSI Mean Reversion** — Buy oversold, sell overbought:
-- RSI(14) with levels 30/70 (standard) or RSI(2) with 10/90 (aggressive)
-- Entry: RSI crosses below 30 → buy; above 70 → sell
-- Exit: RSI reverts to 50 or opposite extreme
-- Filter: Only active when ADX < 20 (ranging market)
-- Best regime: **Ranging**
-
-#### [NEW] `src/strategies/mean_reversion/bollinger.py`
-**Bollinger Band Mean Reversion** — Fade the bands:
-- BB(20, 2σ) — buy at lower band, sell at upper band
-- Confirmation: RSI divergence at band touch
-- Exit: Return to middle band (20 SMA)
-- Filter: BBW stable (not expanding), ADX < 20
-- Best regime: **Ranging**
-
-#### [NEW] `src/strategies/momentum/macd.py`
-**MACD Momentum** — Ride momentum waves:
-- MACD(12, 26, 9) — signal line crossover
-- Zero-line cross for strong momentum confirmation
-- Histogram divergence for early reversal detection
-- Filter: Trade in direction of 50 EMA trend
-- Best regime: **Trending** (early trend)
-
-#### [NEW] `src/strategies/breakout/volume_breakout.py`
-**Volume-Confirmed Breakout** — Trade range expansions:
-- Detect consolidation zones (narrowing Donchian/BB)
-- Entry: Price breaks range with volume > 2× average
-- Stop: Below the consolidation range
-- Target: Range width projected from breakout point
-- Best regime: **Quiet → Trending** transition
-
-#### [NEW] `src/strategies/selector.py`
-**Strategy Selector** — the meta-brain:
-1. Receives current regime from Regime Detector
-2. Filters strategies to those suited for the current regime
-3. Ranks eligible strategies by recent performance score (rolling Sharpe)
-4. Allocates more weight to top-performing strategies
-5. Resolves signal conflicts (if multiple strategies signal, go with highest confidence + best track record)
-6. Can run multiple strategies simultaneously with split allocation
-
----
-
-### Phase 4 — Risk Management
-
-#### [NEW] `src/risk/manager.py`
-Central risk orchestrator:
-- Pre-trade checks: Can we take this trade? (daily loss limit, max positions, drawdown check)
-- Position sizing: Delegates to position sizer
-- Stop-loss enforcement: Every trade MUST have a stop-loss
-- Portfolio heat monitoring: Sum of all position risks < 15%
-- Correlation check: Don't stack correlated positions (BTC + ETH count as 1.5× risk)
-
-#### [NEW] `src/risk/position_sizer.py`
-Three position sizing modes:
-1. **Fixed Fractional** (default): `Size = (Equity × 0.02) / (Entry - Stop)` — risk 2% per trade
-2. **Volatility-Adjusted**: `Size = (Equity × 0.02) / (ATR × 2.5)` — auto-adjusts for volatility
-3. **Half-Kelly**: `Size = 0.5 × (WinRate - (1-WinRate)/PayoffRatio) × Equity` — optimal growth
-
-All methods cap at maximum leverage (5x) and minimum order size.
-
-#### [NEW] `src/risk/circuit_breaker.py`
-Automated kill switches:
-- **Daily Loss Limit** (5%): Stop opening new positions for the day
-- **Max Drawdown** (15%): Close all positions, halt system, alert user
-- **Consecutive Losses** (5 in a row): Reduce position size by 50%
-- **Data Feed Failure**: If no data for 60 seconds, close positions
-- **Exchange Error**: If 3 consecutive API errors, halt and alert
-- All triggers send immediate Telegram notification
-
----
-
-### Phase 5 — Learning & Self-Improvement
-
-#### [NEW] `src/learning/scorer.py`
-Strategy performance scoring (rolling window of last 50 trades or 30 days):
-- Sharpe Ratio (annualized) — weight: 30%
-- Sortino Ratio — weight: 20%
-- Win Rate × Payoff Ratio — weight: 20%
-- Profit Factor — weight: 15%
-- Max Drawdown (inverted) — weight: 15%
-- Composite score → used by Strategy Selector for allocation
-
-#### [NEW] `src/learning/optimizer.py`
-Walk-Forward Optimization:
-- **In-sample window**: 90 days (train)
-- **Out-of-sample window**: 30 days (validate)
-- **Schedule**: Re-optimize every 30 days automatically
-- **Method**: Grid search over key parameters (EMA lengths, ATR multipliers, RSI thresholds)
-- **Overfitting guard**: Require OOS Sharpe ≥ 50% of IS Sharpe
-- **Parameter stability**: Reject parameters that change >30% from previous window
-
-#### [NEW] `src/learning/adapter.py`
-Regime-adaptive parameter tuning:
-- Maintain parameter sets per regime: `{TRENDING: {ema_fast: 9, ema_slow: 21}, RANGING: {rsi_period: 14, rsi_lower: 30}}`
-- When regime changes, load the corresponding parameter set
-- Parameters are updated by the optimizer after each WFO cycle
-- Smooth transitions: blend parameters during regime transitions
-
----
-
-### Phase 6 — Portfolio & Journaling
-
-#### [NEW] `src/portfolio/manager.py`
-Portfolio state management:
-- Track all open positions with real-time P&L
-- Portfolio equity curve
-- Asset allocation breakdown
-- Margin utilization monitoring
-
-#### [NEW] `src/portfolio/journal.py`
-Trade journal using SQLite:
-- Every trade recorded: entry, exit, strategy, regime, P&L, duration, indicators at entry
-- Query interface for performance analysis
-- Export to CSV for external analysis
-- Foundation for the learning engine's data
-
----
-
-### Phase 7 — Dashboard & Notifications
-
-#### [NEW] `src/dashboard/app.py`
-FastAPI web dashboard:
-- **Live chart**: TradingView Lightweight Charts with real-time candles + trade markers
-- **Portfolio view**: Equity curve, open positions, P&L
-- **Strategy monitor**: Which strategy is active, regime classification, signal history
-- **Risk dashboard**: Current drawdown, daily P&L, portfolio heat
-- **Performance table**: Strategy scorecard with key metrics
-- **Trade log**: Searchable trade history
-- Dark-themed, glassmorphism UI with smooth animations
-
-#### [NEW] `src/notifications/telegram.py`
-Telegram bot notifications:
-- Trade executed (entry/exit with details)
-- Regime change alerts
-- Daily performance summary
-- Circuit breaker triggers (URGENT)
-- System health status
-
----
-
-### Phase 8 — Entry Point & Utilities
-
-#### [NEW] `main.py`
-CLI entry point:
-- `python main.py run` — Start the trading engine
-- `python main.py backtest` — Run backtests
-- `python main.py optimize` — Run walk-forward optimization
-- `python main.py dashboard` — Start the dashboard only
-- `python main.py paper` — Paper trading mode (testnet)
-- `python main.py status` — Show current positions and performance
-
-#### [NEW] `requirements.txt`
-Dependencies:
-```
-delta-rest-client>=1.0.0
-ccxt>=4.0.0
-pandas>=2.0.0
-pandas-ta>=0.3.14
-numpy>=1.24.0
-pydantic>=2.0.0
-fastapi>=0.100.0
-uvicorn>=0.23.0
-websockets>=12.0
-aiohttp>=3.9.0
-python-telegram-bot>=20.0
-pyyaml>=6.0
-python-dotenv>=1.0.0
-sqlalchemy>=2.0.0
-aiosqlite>=0.19.0
-lightweight-charts>=2.0
-rich>=13.0.0
-click>=8.0.0
-pyarrow>=14.0.0
-scipy>=1.11.0
-```
-
-#### [NEW] `.env.example`
-```env
-DELTA_API_KEY=your_api_key_here
-DELTA_API_SECRET=your_api_secret_here
-DELTA_TESTNET=true
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-```
-
-#### [NEW] `README.md`
-Comprehensive documentation covering setup, configuration, usage, and risk warnings.
-
----
-
-## Verification Plan
-
-### Automated Tests
-```bash
-# Unit tests for indicators, strategies, and risk management
-python -m pytest tests/ -v
-
-# Backtest on historical data (minimum 6 months)
-python main.py backtest --symbol BTCUSDT --start 2026-01-01 --end 2026-06-30
-
-# Walk-forward optimization validation
-python main.py optimize --symbol BTCUSDT --is-window 90 --oos-window 30
-```
-
-### Manual Verification
-1. **Paper Trading Phase** (2-4 weeks on Delta Exchange testnet):
-   - Verify all order types execute correctly
-   - Confirm regime detection matches visual chart analysis
-   - Validate risk limits trigger properly (simulate drawdown)
-   - Monitor for edge cases (network failures, API rate limits)
-2. **Gradual Live Deployment**:
-   - Start with minimum position sizes on production
-   - Run paper + live in parallel, compare results
-   - Scale up only after consistent positive results over 2+ weeks
-
----
-
-## Implementation Timeline
-
-| Phase | Description | Estimated Effort |
-|---|---|---|
-| **1** | Foundation (engine, models, exchange client) | Core infrastructure |
-| **2** | Market Intelligence (data, indicators, regime) | Data pipeline |
-| **3** | Strategy Pool (7 strategies + selector) | Trading logic |
-| **4** | Risk Management (sizing, stops, circuit breakers) | Safety layer |
-| **5** | Learning Engine (scorer, optimizer, adapter) | Self-improvement |
-| **6** | Portfolio & Journal (tracking, SQLite) | Record-keeping |
-| **7** | Dashboard & Notifications (FastAPI, Telegram) | Monitoring |
-| **8** | Entry point, CLI, documentation | Polish |
-
-> [!TIP]
-> After Phase 4, the system is **fully functional for paper trading**. Phases 5-7 add intelligence and monitoring but aren't blockers for initial testing.
-
----
-
-## Key Design Decisions
-
-1. **Python-native over TradingView**: Building strategies in Python gives us full control over the learning engine, risk management, and strategy selection — things that Pine Script simply cannot do. TradingView's Lightweight Charts library is used only for the dashboard visualization.
-
-2. **Delta Exchange as primary exchange**: INR-settled, FIU-registered, excellent API, testnet available, CCXT-supported. This is the best option for crypto trading in India.
-
-3. **Event-driven async architecture**: Using `asyncio` for non-blocking I/O — critical for handling WebSocket data, REST API calls, and the trading loop simultaneously.
-
-4. **SQLite for trade journal**: Lightweight, zero-config, perfect for a single-process trading system. Can migrate to PostgreSQL later if needed.
-
-5. **Conservative defaults**: 2% risk per trade, 5x max leverage (not 200x), 5% daily loss limit, 15% max drawdown. The system errs on the side of capital preservation.
-
-6. **Walk-forward optimization over static backtesting**: Prevents overfitting. Parameters are always validated on unseen data before being deployed.
+| [QuantConnect LEAN fill models](https://www.quantconnect.com/docs/v2/writing-algorithms/reality-modeling/trade-fills/key-concepts) | Separate strategy decisions from execution; model fill quantity, spread and slippage consistently. |
+| [Freqtrade lookahead analysis](https://docs.freqtrade.io/en/latest/lookahead-analysis/) | Check whether removing future data changes earlier signals. |
+| [Freqtrade recursive analysis](https://docs.freqtrade.io/en/latest/recursive-analysis/) | Check indicator stability across different warm-up histories. |
+| [OpenAlgo sandbox](https://docs.openalgo.in/new-features/api-analyzer) | Separate simulation/live modes and expose orders and operator controls; use our configured capital, not its large default sandbox balance. |
+| [Deflated Sharpe Ratio research](https://doi.org/10.2139/ssrn.2460551) | Preserve multiple-testing penalties rather than selecting the best backtest. |
+| [FYERS tariff](https://fyers.in/charges-list) | Version applicable charges and verify against contract notes; free API access does not mean free trading. |
+
+## Implementation progress, in dependency order
+
+The repository utilities below are implemented and tested where stated. External
+evidence and integration gates remain open; implementation is not qualification.
+
+### 1. Reliable session data
+
+- Implemented: immutable one-session exports with event ordering, instrument-master,
+  explicit intraday corporate-action policy, freshness, quality and content hashes.
+- Integrated: shadow replay accepts and fully revalidates the exported artifact.
+- Completion gate: exported sessions reproduce decisions and quality metrics.
+  Unit fixtures pass; a representative market-hours export remains externally pending.
+
+### 2. Shared execution economics
+
+- Implemented: a shared FYERS fill estimator covers whole lots, fee-inclusive cash
+  reservation, displayed-liquidity full/partial/unfilled outcomes, adverse slippage
+  and tick rounding. Paper and shadow use it; the tariff is effective-date versioned.
+  T+1 obligations are recorded with explicit holiday inputs, and session quality
+  measures exchange-to-receive latency.
+- Remaining: market-measured latency calibration and FYERS historical-backtest
+  accounting parity. Reconcile tariff calculations against contract notes;
+  preserve historical broker/cost assumptions rather than relabelling old results.
+- Completion gate: identical trade sequences produce matching accounting.
+
+### 3. Reproducible strategy research
+
+- Implemented: `research run` exposes an allowlisted real portfolio-backtest adapter
+  from hash-registered CSV artifacts. It emits aligned net, benchmark and turnover
+  series into the immutable experiment lifecycle; chronological split, bootstrap,
+  benchmark and cost-stress reporting use existing validation.
+- Implemented: executable lookahead and warm-up invariance analyzers run inside
+  the registered adapter. Remaining: a holdout-access boundary stronger than the
+  frozen specification and post-run split reporting.
+- Register each campaign's hypothesis, parameter budget, benchmark and rejection
+  criteria before execution; record every tested configuration.
+- Start with an economics audit of existing candidates at the existing ₹10,000
+  research assumption. Retest rejected ideas only when new data or a documented
+  correction justifies it; retain the original failures and historical conclusions.
+- Completion gate: reproduce a registered experiment through the CLI. Strategy
+  advancement additionally requires net-of-cost evidence passing unchanged K-60;
+  a positive backtest or completed research tooling is not qualification.
+
+### 4. Qualification and forward shadow
+
+- Implemented: qualification binds reviewed code, configuration, data, costs and
+  trial-registry hashes; changes block entries. Shadow reports fill rate, missed
+  intents, turnover, execution shortfall and drawdown.
+- Implemented: a qualification- and halt-gated, idempotent target-to-intent scheduler
+  emits auditable paper intents without broker access. Remaining: connect a reviewed
+  NSE strategy producer and define forward acceptance criteria. Synthetic engineering
+  replay is not deployment.
+- Completion gate: reviewed qualification plus forward evidence and replay/forward
+  decision parity. A fixed number of paper-trading days alone is insufficient.
+
+### 5. Broker reliability and usable operations
+
+- Implemented behind the disabled transport: throttled submissions, durable
+  cancel/modify, trade-ID deduplication and order/trade consistency checks. UNKNOWN
+  submissions still require reconciliation. Integrity-checked backups and a
+  fail-closed readiness/alert report are exposed through the CLI.
+- Implemented: REST broker cash/holding/day-position reconciliation blocks entries
+  and persists a halt on divergence. The dashboard exposes readiness and an
+  authenticated FYERS halt. Remaining: streaming order updates and richer dashboard
+  presentation for connection health, stale-data warnings,
+  qualification blockers, reservations, net P&L and an authenticated entry halt.
+- Implemented: a verified direct-dependency lock and isolated restore-drill command.
+  Remaining: external alert delivery and a checked manual release. Logs continue to
+  use existing secret-safe boundaries.
+- Completion gate: crash, timeout, partial-fill and reconnect drills pass;
+  qualified strategy, forward evidence and an accepted loss budget are required
+  before separately authorized live deployment.
+
+## Verification and defaults
+
+Each implementation batch requires focused tests, relevant regression tests,
+critical lint and whitespace checks. Include replay determinism, accounting parity,
+future-data isolation, warm-up stability, evidence invalidation, duplicate fills,
+ambiguous submissions and restart/restore scenarios in the relevant batches.
+
+Keep implemented utilities, integrated workflows and externally verified behavior
+distinct in status reporting. Preserve the completed batch above; its recorded
+test results are historical verification, not a new test run for this roadmap.
+No production behavior or qualification status changes with this documentation update.
+
+Use the existing components; do not recreate the engine, indicators, strategies or
+dashboard from the obsolete Delta proposal. Automatic parameter promotion remains
+disabled. Market-hours samples, measured costs and strategy qualification require
+external evidence and are not completed by passing unit tests.

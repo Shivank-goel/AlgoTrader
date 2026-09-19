@@ -17,6 +17,7 @@ import pytest
 def failing_engine(isolated_engine, monkeypatch):
     """Engine whose exchange sync always raises, with alerts captured."""
     eng = isolated_engine
+    eng.order_manager.paper_mode = False  # exercise broker sync, independent of safe defaults
 
     eng.exchange.get_balance = AsyncMock(side_effect=ConnectionError("network down"))
     eng.exchange.get_positions = AsyncMock(side_effect=ConnectionError("network down"))
@@ -75,6 +76,7 @@ async def test_audit_log_records_one_halt_per_outage(failing_engine):
 async def test_successful_sync_resets_the_failure_counter(isolated_engine, monkeypatch):
     """A recovery must clear the counter so the next outage can halt again."""
     eng = isolated_engine
+    eng.order_manager.paper_mode = False
     eng._consecutive_sync_failures = 3
 
     eng.exchange.get_balance = AsyncMock(return_value={"result": []})

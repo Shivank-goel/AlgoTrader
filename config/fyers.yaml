@@ -1,0 +1,3 @@
+# Standalone NSE integration; the legacy Delta engine does not consume this file.
+base_url: https://api-t1.fyers.in/api/v3
+timeout_seconds: 20

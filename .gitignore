@@ -14,7 +14,7 @@ build/
 venv/
 
 # Data & logs
-data/
+/data/
 logs/
 *.db
 *.parquet

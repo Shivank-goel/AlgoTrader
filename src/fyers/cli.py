@@ -1,0 +1,189 @@
+"""Explicit FYERS commands; no implicit fallback to the crypto engine."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+
+import click
+
+from src.fyers.costs import FyersCosts
+from src.fyers.journal import Journal
+from src.fyers.models import ROOT, RuntimeConfig, Side
+from src.fyers.qualification import qualification
+
+
+@click.group()
+def fyers() -> None:
+    """FYERS NSE market recording, readiness and gated paper execution."""
+
+
+@fyers.command()
+@click.option("--seconds", type=click.FloatRange(min=1), default=60, show_default=True)
+def record(seconds: float) -> None:
+    """Record live market events for a bounded duration; no orders."""
+    from src.fyers.runtime import observe
+    try:
+        click.echo(json.dumps(asyncio.run(observe(seconds)), indent=2))
+    except Exception:
+        raise click.ClickException("Recorder failed; check token, connectivity and configuration. No orders sent.") from None
+
+
+@fyers.command()
+@click.argument("intents", type=click.Path(exists=True, path_type=Path))
+@click.option("--seconds", type=click.FloatRange(min=1), default=60)
+def paper(intents: Path, seconds: float) -> None:
+    """Simulate qualified entries or validated reductions of existing holdings."""
+    from src.fyers.runtime import observe
+    try:
+        click.echo(json.dumps(asyncio.run(observe(seconds, intents)), indent=2))
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
+
+
+@fyers.command()
+def status() -> None:
+    """Show deployment blockers and local evidence; never expose account data."""
+    config = RuntimeConfig.load()
+    passed, reason = qualification(ROOT / config.qualification_file, ROOT / config.trials_file)
+    payload = {"broker": "fyers", "strategy_qualified": passed, "qualification": reason,
+               "live_enabled": False, "live_blocker": "Production risk/reconciliation integration and deployment drills pending",
+               "symbols": config.symbols}
+    path = ROOT / config.database
+    if path.exists():
+        journal = Journal(path)
+        try:
+            payload["halt_reason"] = journal.get("halt_reason")
+            payload["account_check"] = journal.get("account_check")
+            payload["recorded_ticks"] = journal.db.execute("SELECT COUNT(*) FROM events WHERE kind='tick'").fetchone()[0]
+            payload["paper_fills"] = journal.db.execute("SELECT COUNT(*) FROM fills").fetchone()[0]
+            payload["paper_valuation"] = journal.get("paper_valuation")
+        finally:
+            journal.close()
+    click.echo(json.dumps(payload, indent=2))
+
+
+@fyers.command()
+@click.argument("reason")
+def halt(reason: str) -> None:
+    """Persistently block new paper exposure; validated exits remain possible."""
+    journal = Journal(ROOT / RuntimeConfig.load().database)
+    try:
+        journal.halt(reason)
+    finally:
+        journal.close()
+    click.echo("Paper account halted. Existing positions are not liquidated.")
+
+
+@fyers.command("backup")
+@click.option("--output", type=click.Path(path_type=Path))
+def backup(output: Path | None) -> None:
+    """Create an integrity-checked SQLite backup; never overwrite a backup."""
+    from datetime import datetime, timezone
+    from src.fyers.operations import backup_database, verify_backup
+    config = RuntimeConfig.load()
+    destination = output or (ROOT / config.backup_directory /
+                             f"runtime-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.sqlite3")
+    try:
+        backup_database(ROOT / config.database, destination)
+        click.echo(json.dumps({"path": str(destination), **verify_backup(destination)}, indent=2))
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
+
+
+@fyers.command("readiness")
+def readiness_command() -> None:
+    """Show alerts and release blockers; never enable live execution."""
+    from src.fyers.operations import readiness
+    click.echo(json.dumps(readiness(RuntimeConfig.load()), indent=2))
+
+
+@fyers.command("restore-drill")
+@click.option("--backup", "backup_path", type=click.Path(exists=True, path_type=Path), required=True)
+@click.option("--output-directory", type=click.Path(path_type=Path), required=True)
+def restore_drill_command(backup_path: Path, output_directory: Path) -> None:
+    """Restore a backup into a new isolated directory and verify it."""
+    from src.fyers.operations import restore_drill
+    try:
+        click.echo(json.dumps(restore_drill(backup_path, output_directory), indent=2))
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
+
+
+@fyers.command()
+@click.option("--notional", type=click.FloatRange(min=0, min_open=True), default=10000)
+def costs(notional: float) -> None:
+    """Published-tariff estimate, not a contract-note reconciliation."""
+    model = FyersCosts.load()
+    for delivery in (False, True):
+        total = sum(model.fee(notional, side, delivery=delivery, charge_dp=delivery and side == Side.SELL) for side in Side)
+        click.echo(f"{'Delivery' if delivery else 'Intraday'} round trip: INR {total:.4f}; excludes spread/slippage")
+
+
+@fyers.command("quality")
+@click.option("--start", type=float, required=True, help="Eligible window start: Unix seconds")
+@click.option("--end", type=float, required=True, help="Eligible window end: Unix seconds")
+def quality(start: float, end: float) -> None:
+    """Replay recorded events read-only and report executable-quote coverage."""
+    from src.data.quality import quote_quality
+    from src.data.replay import read_events
+    config = RuntimeConfig.load()
+    events, digest = read_events(ROOT / config.database)
+    result = quote_quality(events, config.symbols, start=start, end=end, stale_seconds=config.stale_seconds)
+    click.echo(json.dumps({**result, "event_snapshot_sha256": digest}, indent=2))
+
+
+@fyers.command("export-session")
+@click.option("--start", type=float, required=True, help="Eligible window start: Unix seconds")
+@click.option("--end", type=float, required=True, help="Eligible window end: Unix seconds")
+@click.option("--output", type=click.Path(path_type=Path), required=True)
+def export_session_command(start: float, end: float, output: Path) -> None:
+    """Export one immutable, bounded FYERS session for replay."""
+    from src.data.session import export_session
+    config = RuntimeConfig.load()
+    try:
+        artifact = export_session(ROOT / config.database, output, start=start, end=end,
+                                  symbols=config.symbols, stale_seconds=config.stale_seconds)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
+    click.echo(json.dumps({"path": str(output), "session_sha256": artifact.session_sha256,
+                           "quality": artifact.quality}, indent=2))
+
+
+@fyers.command("replay")
+@click.argument("intents_path", type=click.Path(exists=True, path_type=Path))
+@click.option("--output-directory", type=click.Path(path_type=Path), required=True)
+@click.option("--session-export", type=click.Path(exists=True, path_type=Path))
+def replay(intents_path: Path, output_directory: Path, session_export: Path | None) -> None:
+    """Replay recorded quotes into a NEW gated shadow ledger; never send orders."""
+    from src.data.replay import read_events
+    from src.fyers.models import Instrument, Intent
+    from src.fyers.paper import PaperBroker
+    from src.shadow.runtime import replay_session
+    config = RuntimeConfig.load()
+    if session_export:
+        from src.data.session import load_session
+        try:
+            artifact = load_session(session_export)
+        except ValueError as exc:
+            raise click.ClickException(f"Invalid session export: {exc}") from None
+        events, digest = artifact.events, artifact.session_sha256
+        instruments = artifact.instruments
+    else:
+        events, digest = read_events(ROOT / config.database)
+        masters = [e["data"] for e in events if e["kind"] == "instruments"]
+        if not masters or any(master != masters[0] for master in masters):
+            raise click.ClickException("Replay requires one consistent recorded instrument master; use --session-export")
+        instruments = {s: Instrument.model_validate(row) for s, row in masters[0].items()}
+    intents = [Intent.model_validate(row) for row in json.loads(intents_path.read_text())]
+    if output_directory.exists():
+        raise click.ClickException("Output directory already exists; never reuse a shadow ledger")
+    output_directory.mkdir(parents=True)
+    journal = Journal(output_directory / "shadow.sqlite3")
+    try:
+        result = replay_session(events, instruments, intents, PaperBroker(journal, config, FyersCosts.load()))
+        journal.event("replay_provenance", {"event_snapshot_sha256": digest})
+        click.echo(json.dumps({**result, "event_snapshot_sha256": digest}, indent=2))
+    finally:
+        journal.close()

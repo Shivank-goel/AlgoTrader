@@ -1,0 +1,16 @@
+# Published tariff, checked 2026-09-18: https://fyers.in/charges-list
+# NSE cash equity only; not futures/options/MTF. Contract-note rounding may differ.
+tariff_version: fyers-nse-cash-2024-10-01
+effective_from: 2024-10-01
+brokerage_intraday_bps: 3
+brokerage_delivery_bps: 30
+brokerage_cap_inr: 20
+exchange_bps: 0.30699
+sebi_bps: 0.01
+ipft_bps: 0.00001
+gst_rate: 0.18
+stt_intraday_sell_bps: 2.5
+stt_delivery_bps: 10
+stamp_intraday_buy_bps: 0.3
+stamp_delivery_buy_bps: 1.5
+dp_sell_inr: 12.5  # once per ISIN/day, plus GST

@@ -15,9 +15,13 @@ so `n_obs` is the trade count.
 
 from __future__ import annotations
 
+import fcntl
+import hashlib
 import json
 import logging
 import math
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -178,9 +182,14 @@ def paired_bootstrap_ci(
     Returns (point_estimate, lower, upper). Paired because A/B arms on the same
     signal stream are not independent samples.
     """
-    x = _clean(a)
-    y = _clean(b)
-    n = min(len(x), len(y))
+    x, y = np.asarray(list(a), dtype=float), np.asarray(list(b), dtype=float)
+    if x.ndim != 1 or y.ndim != 1 or len(x) != len(y):
+        raise ValueError("Paired observations must have equal lengths")
+    if n_boot < 1 or not 0 < confidence < 1:
+        raise ValueError("Invalid bootstrap configuration")
+    valid = np.isfinite(x) & np.isfinite(y)
+    x, y = x[valid], y[valid]
+    n = len(x)
     if n < 2:
         return 0.0, 0.0, 0.0
 
@@ -230,6 +239,10 @@ class Trial:
         }
 
 
+class RegistryIntegrityError(ValueError):
+    """Research history is unreadable or inconsistent; never reset it implicitly."""
+
+
 class TrialsRegistry:
     """Append-only record of every configuration ever evaluated.
 
@@ -240,51 +253,131 @@ class TrialsRegistry:
     """
 
     def __init__(self, path: str = DEFAULT_TRIALS_PATH) -> None:
-        self.path = Path(path)
+        self.path = Path(path).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._trials: list[Trial] = []
+        self._rows: list[dict[str, Any]] = []
+        self._seen_file = False
+        self.snapshot_sha256: str | None = None
         self._load()
 
     def _load(self) -> None:
         if not self.path.exists():
+            if self._seen_file:
+                raise RegistryIntegrityError("Previously loaded trial registry is missing")
             return
         try:
-            raw = json.loads(self.path.read_text())
-        except (OSError, json.JSONDecodeError):
-            logger.warning("Trials registry at %s unreadable; starting empty", self.path)
-            return
-        for row in raw.get("trials", []):
-            self._trials.append(
-                Trial(
-                    name=row.get("name", "?"),
-                    sharpe=float(row.get("sharpe", 0.0)),
-                    n_obs=int(row.get("n_obs", 0)),
-                    net_return_pct=float(row.get("net_return_pct", 0.0)),
-                    t_stat=float(row.get("t_stat", 0.0)),
-                    family=row.get("family", "unspecified"),
-                    params=row.get("params", {}),
-                    recorded_at=row.get("recorded_at", ""),
-                )
-            )
+            snapshot = self.path.read_bytes()
+            raw = self.validate_snapshot(snapshot)
+            rows = raw["trials"]
+            if rows[:len(self._rows)] != self._rows:
+                raise ValueError("Previously loaded research history changed")
+            trials = [Trial(**{k: row[k] for k in Trial.__dataclass_fields__}) for row in rows]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise RegistryIntegrityError("Trial registry invalid; restore verified history before research") from exc
+        self._rows, self._trials = rows, trials
+        self._seen_file = True
+        self.snapshot_sha256 = hashlib.sha256(snapshot).hexdigest()
 
-    def _save(self) -> None:
+    @classmethod
+    def validate_snapshot(cls, snapshot: bytes) -> dict[str, Any]:
+        """Validate exactly the captured bytes, without a second filesystem read."""
+        try:
+            raw = json.loads(snapshot)
+            if not isinstance(raw, dict) or not isinstance(raw.get("trials"), list):
+                raise ValueError("Invalid registry object")
+            if type(raw.get("count")) is not int or raw["count"] != len(raw["trials"]):
+                raise ValueError("Invalid trial count")
+            for row in raw["trials"]:
+                cls._validate_row(row)
+            return raw
+        except (ValueError, KeyError, TypeError) as exc:
+            raise RegistryIntegrityError("Invalid captured trial history") from exc
+
+    def record_once(self, trial: Trial) -> Trial:
+        """Append one experiment atomically, or return its identical stored trial.
+
+        Identity is params.experiment_id; both name and identity collisions fail.
+        recorded_at is assigned on first publication and ignored on a retry.
+        count, dispersion and snapshot_sha256 describe the same captured snapshot.
+        """
+        self._validate_row(vars(trial))
+        incoming = trial.to_dict()
+        identity = incoming["params"].get("experiment_id")
+        if not isinstance(identity, str) or not identity:
+            raise ValueError("record_once requires an experiment_id")
+        with self.path.with_suffix(self.path.suffix + ".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self._load()
+            matches = [r for r in self._rows if r["name"] == incoming["name"]
+                       or r["params"].get("experiment_id") == identity]
+            if matches:
+                comparable = lambda row: {k: v for k, v in row.items() if k != "recorded_at"}
+                if len(matches) != 1 or comparable(matches[0]) != comparable(incoming):
+                    raise RegistryIntegrityError("Conflicting experiment trial publication")
+                stored = matches[0]
+            else:
+                self._save(self._rows + [incoming])
+                self._load()
+                stored = self._rows[-1]
+            # Return a detached copy so callers cannot mutate the captured history.
+            return Trial(**json.loads(json.dumps(stored)))
+
+    @staticmethod
+    def _validate_row(row: dict[str, Any]) -> None:
+        if not isinstance(row, dict):
+            raise ValueError("Invalid trial record")
+        for key in ("name", "family", "recorded_at"):
+            if not isinstance(row.get(key), str) or not row[key]:
+                raise ValueError(f"Invalid trial {key}")
+        if type(row.get("n_obs")) is not int or row["n_obs"] < 0:
+            raise ValueError("Invalid observation count")
+        for key in ("sharpe", "net_return_pct", "t_stat"):
+            value = row.get(key)
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise ValueError(f"Invalid trial {key}")
+        if not isinstance(row.get("params"), dict):
+            raise ValueError("Invalid parameters")
+        json.dumps(row, allow_nan=False)
+
+    def _save(self, rows: list[dict[str, Any]]) -> None:
         payload = {
-            "count": len(self._trials),
+            "count": len(rows),
             "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "trials": [t.to_dict() for t in self._trials],
+            "trials": rows,
         }
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, indent=2))
-        tmp.replace(self.path)
+        encoded = json.dumps(payload, indent=2, allow_nan=False)
+        fd, name = tempfile.mkstemp(prefix=self.path.name + ".", dir=self.path.parent)
+        tmp = Path(name)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            tmp.replace(self.path)
+            directory_fd = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     def record(self, trial: Trial) -> None:
-        self._trials.append(trial)
-        self._save()
+        self.record_many([trial])
 
     def record_many(self, trials: Iterable[Trial]) -> int:
-        added = list(trials)
-        self._trials.extend(added)
-        self._save()
+        added = []
+        for trial in trials:
+            # Validate before to_dict() can coerce invalid booleans/fractional counts.
+            self._validate_row(vars(trial))
+            added.append(trial.to_dict())
+        with self.path.with_suffix(self.path.suffix + ".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self._load()
+            if added:
+                self._save(self._rows + added)
+                self._load()
         return len(added)
 
     @property

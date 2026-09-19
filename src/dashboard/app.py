@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
+import os
+import secrets
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -66,6 +68,21 @@ def _positions_payload(engine: Any) -> list[dict[str, Any]]:
 
 def create_app(engine: Optional[Any] = None) -> FastAPI:
     app = FastAPI(title="Crypto Trader Dashboard", version="2.0.0")
+    control_token = os.environ.get("DASHBOARD_CONTROL_TOKEN", "")
+
+    @app.middleware("http")
+    async def authorize_controls(request: Request, call_next):
+        # Read-only monitoring remains local/public. Never trust localhost or
+        # a browser cookie as authorization for changing engine state.
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            if len(control_token) < 32:
+                return JSONResponse({"error": "Dashboard controls disabled: configure a strong control token"}, status_code=503)
+            supplied = request.headers.get("Authorization", "")
+            expected = f"Bearer {control_token}"
+            if not secrets.compare_digest(supplied.encode(), expected.encode()):
+                return JSONResponse({"error": "Unauthorized dashboard control"}, status_code=401)
+        return await call_next(request)
+
     templates = Jinja2Templates(directory=str(DASHBOARD_DIR / "templates"))
 
     static_dir = DASHBOARD_DIR / "static"
@@ -285,6 +302,29 @@ def create_app(engine: Optional[Any] = None) -> FastAPI:
             "positions": _positions_payload(engine),
             "timestamp": datetime.utcnow().isoformat(),
         }
+
+    @app.get("/api/fyers/readiness")
+    async def fyers_readiness():
+        """Read-only FYERS blockers and alerts; never authorizes live trading."""
+        from src.fyers.models import RuntimeConfig
+        from src.fyers.operations import readiness
+        return readiness(RuntimeConfig.load())
+
+    @app.post("/api/fyers/halt")
+    async def fyers_halt(request: Request):
+        """Authenticated persistent entry halt for the separate FYERS journal."""
+        from src.fyers.journal import Journal
+        from src.fyers.models import ROOT, RuntimeConfig
+        body = await request.json()
+        reason = body.get("reason") if isinstance(body, dict) else None
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 200:
+            return JSONResponse({"error": "A halt reason of 1-200 characters is required"}, status_code=400)
+        journal = Journal(ROOT / RuntimeConfig.load().database)
+        try:
+            journal.halt(reason.strip())
+        finally:
+            journal.close()
+        return {"status": "halted", "live_enabled": False}
 
     @app.get("/api/errors")
     async def errors(limit: int = 20):

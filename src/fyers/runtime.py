@@ -1,0 +1,200 @@
+"""FYERS observation service with durable ticks, session checks and paper handoff."""
+
+from __future__ import annotations
+
+import asyncio
+import fcntl
+import json
+import os
+from pathlib import Path
+import sys
+import time
+
+from dotenv import load_dotenv
+from pydantic import ValidationError
+
+from src.execution.fyers import FyersClient
+from src.fyers.costs import FyersCosts
+from src.fyers.instruments import resolve_instruments
+from src.fyers.journal import Journal
+from src.fyers.models import Intent, Quote, ROOT, RuntimeConfig, Side
+from src.fyers.paper import PaperBroker
+from src.fyers.qualification import qualification
+
+
+def parse_quote(data: dict, received: float) -> Quote:
+    return Quote(symbol=data["symbol"], bid=data["bid_price"], ask=data["ask_price"],
+                 bid_size=data["bid_size"], ask_size=data["ask_size"],
+                 exchange_time=data["exch_feed_time"], received_time=received)
+
+
+def nse_open(body: dict) -> bool:
+    rows = body.get("marketStatus", [])
+    return any(str(row.get("exchange")) in {"NSE", "10"}
+               and str(row.get("segment")) in {"CM", "10"}
+               and row.get("market_type") == "NORMAL" and row.get("status") == "OPEN"
+               for row in rows if isinstance(row, dict))
+
+
+async def observe(duration: float = 0, intents_path: Path | None = None) -> dict:
+    config = RuntimeConfig.load()
+    load_dotenv(ROOT / ".env", override=True)
+    client = FyersClient.from_env()
+    journal = Journal(ROOT / config.database)
+    lock = (ROOT / config.database).with_suffix(".lock").open("a")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock.close()
+        journal.close()
+        raise ValueError("A FYERS recorder already owns this database") from None
+    process = None
+    tasks = []
+    quotes: dict[str, Quote] = {}
+    queue: asyncio.Queue = asyncio.Queue(maxsize=config.queue_size)
+    summary = {"ticks": 0, "valid_quotes": 0, "connections": 0, "errors": 0}
+    market = {"open": False, "checked": 0.0}
+    account_refresh = asyncio.Event()
+    try:
+        paper = PaperBroker(journal, config, FyersCosts.load())
+        intents = []
+        if intents_path:
+            intents = [Intent.model_validate(row) for row in json.loads(intents_path.read_text())]
+            if any(intent.side == Side.BUY for intent in intents):
+                ok, reason = qualification(ROOT / config.qualification_file, ROOT / config.trials_file)
+                permitted = []
+                for intent in intents:
+                    if intent.side == Side.SELL or (ok and intent.strategy == reason):
+                        permitted.append(intent)
+                    else:
+                        journal.event("paper_rejected", {
+                            "intent_id": intent.intent_id,
+                            "reason": "Entry strategy is not qualified",
+                        })
+                intents = permitted
+                if not intents:
+                    raise ValueError("Paper deployment blocked: no qualified entries or risk-reducing exits")
+        held_symbols = [row[0] for row in journal.db.execute("SELECT symbol FROM positions WHERE quantity>0")]
+        symbols = sorted(set(config.symbols) | set(held_symbols))
+        instruments = await resolve_instruments(config.master_url, symbols)
+        await client.get_profile()
+        journal.event("instruments", {s: i.model_dump(mode="json") for s, i in instruments.items()})
+        # Prevent inherited credentials from appearing in process arguments.
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "src.fyers.stream_worker", cwd=ROOT,
+            env={**os.environ, "FYERS_RECORDER_PID": str(os.getpid()),
+                 "FYERS_RECORD_SYMBOLS": json.dumps(symbols)},
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+
+        async def read_stream() -> None:
+            assert process.stdout is not None
+            while line := await process.stdout.readline():
+                try:
+                    event = json.loads(line)
+                    if event.get("kind") not in {"tick", "connected", "disconnected", "error"}:
+                        continue
+                    queue.put_nowait(event)
+                except json.JSONDecodeError:
+                    continue  # SDK's reconnect notices contain no market event.
+                except asyncio.QueueFull:
+                    journal.halt("market queue overflow; data gap")
+                    raise RuntimeError("Recorder cannot keep up with stream") from None
+            raise RuntimeError("Streaming worker stopped")
+
+        async def account_checks() -> None:
+            while True:
+                market["open"] = False
+                try:
+                    # No positions are adopted into paper accounting. Broker and
+                    # simulator are deliberately separate ledgers.
+                    positions, orders, trades, status = await asyncio.gather(
+                        client.get_positions(), client.get_orders(), client.get_trades(),
+                        client.get_market_status(),
+                    )
+                    for body, key in [(positions, "netPositions"), (orders, "orderBook"), (trades, "tradeBook")]:
+                        if not isinstance(body.get(key), list):
+                            raise ValueError("Invalid account snapshot")
+                    market.update(open=nse_open(status), checked=time.time())
+                    counts = {"positions": len(positions["netPositions"]),
+                              "orders": len(orders["orderBook"]), "trades": len(trades["tradeBook"]),
+                              "market_open": market["open"]}
+                    journal.event("account_check", counts)
+                    with journal.db:
+                        journal.put("account_check", {**counts, "at": market["checked"]})
+                except Exception as exc:
+                    journal.event("account_error", {"reason": "account/session check failed", "error_type": type(exc).__name__})
+                    summary["errors"] += 1
+                try:
+                    await asyncio.wait_for(account_refresh.wait(), config.reconcile_seconds)
+                except asyncio.TimeoutError:
+                    pass
+                account_refresh.clear()
+
+        tasks = [asyncio.create_task(read_stream()), asyncio.create_task(account_checks())]
+        started = time.monotonic()
+        last_health = 0.0
+        while not duration or time.monotonic() - started < duration:
+            for task in tasks:
+                if task.done():
+                    task.result()
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=1)
+                kind, received, data = event["kind"], event["received"], event["data"]
+                journal.event(kind, data, received)
+                if kind == "connected":
+                    quotes.clear()
+                    summary["connections"] += 1
+                    market["open"] = False  # require a new account/session check
+                    account_refresh.set()
+                elif kind in {"error", "disconnected"}:
+                    quotes.clear()
+                    summary["errors"] += 1
+                elif kind == "tick":
+                    summary["ticks"] += 1
+                    try:
+                        quote = parse_quote(data, received)
+                        if quote.symbol in instruments:
+                            old = quotes.get(quote.symbol)
+                            if not quote.usable(received, config.stale_seconds):
+                                quotes.pop(quote.symbol, None)
+                            elif old is None or quote.exchange_time >= old.exchange_time:
+                                quotes[quote.symbol] = quote
+                                summary["valid_quotes"] += 1
+                    except (KeyError, ValueError, ValidationError):
+                        quotes.pop(data.get("symbol"), None)
+                now = time.time()
+                for intent in intents[:]:
+                    if intent.symbol in quotes:
+                        try:
+                            paper.fill(intent, instruments[intent.symbol], quotes, now=now,
+                                       market_open=market["open"] and now - market["checked"] < config.reconcile_seconds * 2)
+                        except ValueError as exc:
+                            journal.event("paper_rejected", {"intent_id": intent.intent_id, "reason": str(exc)})
+                        intents.remove(intent)
+            except asyncio.TimeoutError:
+                pass
+            paper.mark_to_market(quotes, now=time.time())
+            if time.monotonic() - last_health >= 5:
+                now = time.time()
+                fresh = [s for s, q in quotes.items() if q.usable(now, config.stale_seconds)]
+                journal.event("feed_health", {"fresh_symbols": fresh, "market_open": market["open"]})
+                last_health = time.monotonic()
+        journal.event("recorder_stopped", summary)
+        if not summary["connections"]:
+            raise RuntimeError("No authenticated stream connection was established")
+        return summary
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        if process and process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+        await client.close()
+        journal.close()
+        lock.close()

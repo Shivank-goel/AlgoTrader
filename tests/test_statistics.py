@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from src.backtest.statistics import (
+    RegistryIntegrityError,
     Trial,
     TrialsRegistry,
     benjamini_hochberg,
@@ -228,10 +229,12 @@ def test_registry_dispersion_is_zero_when_too_few_trials(registry):
     assert registry.sharpe_std() == 0.0
 
 
-def test_registry_survives_a_corrupt_file(tmp_path):
+def test_registry_refuses_a_corrupt_file(tmp_path):
     path = tmp_path / "trials.json"
     path.write_text("{ not json")
-    assert TrialsRegistry(str(path)).count == 0
+    with pytest.raises(RegistryIntegrityError):
+        TrialsRegistry(str(path))
+    assert path.read_text() == "{ not json"
 
 
 def test_registry_summary_groups_by_family(registry):

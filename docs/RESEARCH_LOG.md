@@ -383,3 +383,88 @@ and the widest spreads live in the same names, so K-91 now gates a live decision
 the same strategy holds 15 names at 93–97% affordability with far less concentration risk and
 a +2 to +7pp edge over the fund. At ₹10,000 the only affordable version is a coin-flip on a
 52% drawdown. §0 updated.
+
+## R-16 — Deployment architecture for a Dhan/NSE automated system
+2026-09-17 · **IMPLEMENTATION FOUNDATION; NOT A STRATEGY RESULT** · Uses: K-02, K-13, K-47, K-56, K-57, K-60, K-96, K-97 · Changes: K-96, K-97
+
+**Question** What can honestly be built after the current strategy search reached a negative result, without turning an unqualified backtest into automated trading?
+
+**Method** Reviewed Dhan's current order and authentication documentation and SEBI's final retail API-algo implementation timeline. Kept broker transport separate from strategy and risk policy, and implemented only a fail-closed Dhan gateway (`src/execution/dhan.py`).
+
+**Findings** Dhan requires a static allowlisted IP for order changes, individual access tokens are short-lived, and its API provides a user-defined `correlationId` plus lookup by that key. This makes correlation-ID recovery the correct response to an ambiguous submission; retrying the POST risks duplicate orders. The SEBI framework is already applicable, so compliance and broker readiness are deployment gates, not future work.
+
+**Result** The gateway defaults to refusing order submission, validates Dhan request fields, and performs correlation-ID adoption after an ambiguous POST. Its tests use mocks only; no broker account was accessed. `docs/AUTOMATED_SYSTEM_REFERENCE.md` records the target architecture and deployment gates.
+
+**Verdict** The repository now has a safe broker-boundary foundation and a durable source-backed reference. It does **not** have evidence authorising a live strategy at ₹10,000. The next useful work is shadow execution and data collection, not another unconstrained parameter sweep.
+
+## R-17 — Select a data/broker route under a minimal operating budget
+2026-09-17 · **PLATFORM DECISION SUPPORT; NOT A STRATEGY RESULT** · Uses: K-02, K-60, K-96, K-97, K-98 · Changes: K-98
+
+**Finding** Dhan's trading API is free but its current published Data API price is ₹499/month. FYERS states that its trading, historical, quote, and market-data APIs are free for clients. Both impose the current retail-algo static-IP, authentication, and order-rate controls.
+
+**Decision** Use free official NSE EOD data for research. If and when the system needs a live shadow feed, FYERS is the preferred zero-recurring-data-fee route; Dhan remains viable if the existing broker relationship is worth the paid data plan. The complete setup sequence is recorded in `docs/BROKER_SETUP_GUIDE.md`.
+
+## R-18 — Select FYERS and align implementation scope
+
+**Date** 2026-09-18. **Uses:** K-60, K-98. **Changes:** K-02, K-91, K-92.
+
+**Decision** User selected FYERS. Updated current architecture, agent instructions
+and setup guide; retained Dhan code and historical cost evidence as legacy.
+
+**Implementation** Added standalone read-only FYERS account access, endpoint
+configuration and credential placeholders. HTTP tests use mocks. No credentials,
+live account access, market feed or order placement were used. The Delta runtime
+is unchanged. Authentication helper and data recording are the next milestones.
+
+**Evidence** FYERS' official endpoint catalog documents the v3 account paths,
+authorization header and success/error envelopes:
+https://github.com/FyersDev/fyers-skills/blob/master/skills/fyers-trading/references/endpoints.md
+No strategy hypothesis was tested and no trial was added. Existing Dhan costs
+must be revalidated for FYERS before strategy qualification.
+
+## R-19 — FYERS observation and gated execution infrastructure
+
+2026-09-18 · **IMPLEMENTATION, NOT A STRATEGY TRIAL** · Uses: K-02, K-21, K-24, K-60, K-91, K-92 · Changes: K-02, K-91, K-92
+
+Implemented CLI observation, official-SDK streaming, instrument master lookup,
+SQLite journal, conservative long-only delivery paper ledger, full-registry
+qualification checks and disabled limit-order transport. Tests cover stale and
+invalid quotes, duplicate intents, persisted halts, DP-charge deduplication,
+ambiguous submissions and partial-fill reconciliation. The transport has no
+production enable path: risk/position integration and order lifecycle remain gates.
+
+Read-only external checks verified the authenticated stream and two configured
+NSE instruments. A 15-second recording received two ticks, neither with a valid
+two-sided executable book. This is connectivity evidence, not a market-hours soak
+or strategy result. No orders were submitted.
+
+FYERS' published delivery brokerage differs materially from the historical Dhan
+assumptions. The separate model uses the current [FYERS tariff](https://fyers.in/charges-list)
+and [DP frequency](https://support.fyers.in/portal/en/kb/articles/how-are-dp-charges-levied-in-fyers).
+Contract-note validation is pending. Existing backtests were not rerun or relabelled.
+
+Registry inspection found 206 existing trials (the eight latest dated 2026-08-25);
+the knowledge header's 198 and pass-mark prose's 162 were stale. Updated the
+current counts without changing historical results or adding any trial. No
+candidate has been newly qualified. Exact scope/blockers: `docs/FYERS_OPERATIONS.md`.
+
+## R-20 — Paper entry/exit permissions and continuous risk accounting
+
+2026-09-18 · **IMPLEMENTATION; NOT A STRATEGY TRIAL** · Uses: K-02, K-60, K-76, K-77
+
+Implemented P0 items 1–2 from `docs/IMPLEMENTATION_PLAN.md`. Paper reductions
+remain restricted to held quantity but no longer require a valid entry qualification,
+an unhalted entry state, the entry order cap or fresh unrelated holdings. Their own
+quotes/session/liquidity remain mandatory. Runtime intent filtering preserves
+eligible reductions when rejecting unqualified entries; held symbols stay subscribed.
+
+Added stream/timeout-driven valuation, persisted prior-day baselines, realized and
+unrealized P&L, fees and legacy fill-based accounting recovery. Missing marks are
+reported as incomplete rather than valued at zero; they block new exposure. Loss
+breaches latch without requiring a new order, and entry costs cannot consume more
+than the remaining configured daily loss allowance. No automatic liquidation occurs.
+
+Synthetic regression cases cover restrictions on entries versus exits, stale
+holdings, uncovered sells, overnight gaps, restart and P&L reconciliation. No
+broker action, strategy run or trial-registry change was made. Qualification
+provenance and the production release boundary are still pending P0 work.
