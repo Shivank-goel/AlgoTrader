@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from enum import Enum
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -68,6 +68,33 @@ class NseSessionCalendar:
                 return f"{candidate.isoformat()}T{self.start}:00+05:30"
             candidate += timedelta(days=1)
         return None
+
+    def is_trading_day(self, day: date) -> bool:
+        """Return reviewed calendar membership; invalid calendars fail closed."""
+        return day.weekday() < 5 and day not in self._holidays(day.year)
+
+    def trading_day_offset(self, day: date, sessions: int) -> date:
+        """Move by reviewed NSE sessions, never by wall-clock days."""
+        if type(sessions) is not int or sessions < 0:
+            raise ValueError("sessions must be a non-negative integer")
+        current = day
+        remaining = sessions
+        while remaining:
+            current += timedelta(days=1)
+            if current.year != day.year:
+                # Every calendar year must be separately reviewed.
+                self._holidays(current.year)
+            if self.is_trading_day(current):
+                remaining -= 1
+        return current
+
+    def session_bounds(self, day: date) -> tuple[datetime, datetime]:
+        """Return timezone-aware configured recording bounds for a trading day."""
+        if not self.is_trading_day(day):
+            raise ValueError("date is not a reviewed NSE trading session")
+        start = time.fromisoformat(self.start)
+        end = time.fromisoformat(self.end)
+        return datetime.combine(day, start, IST), datetime.combine(day, end, IST)
 
     def state(self, now: datetime | None = None) -> SessionState:
         local = self._local(now)

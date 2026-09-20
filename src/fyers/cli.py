@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import click
@@ -105,6 +105,70 @@ def readiness_command() -> None:
     click.echo(json.dumps(readiness(RuntimeConfig.load()), indent=2))
 
 
+@fyers.command("preflight")
+@click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON")
+@click.option("--strict", is_flag=True, help="Exit non-zero when a blocking check fails")
+@click.option("--offline", is_flag=True, help="Skip FYERS authentication and outbound-IP checks")
+@click.pass_context
+def preflight_command(ctx, json_output: bool, strict: bool, offline: bool) -> None:
+    """Audit VM/runtime readiness without enabling orders."""
+    from src.fyers.operations import preflight
+    result = asyncio.run(preflight(RuntimeConfig.load(), network=not offline))
+    if json_output:
+        click.echo(json.dumps(result, indent=2))
+    else:
+        for row in result["checks"]:
+            click.echo(f"{'PASS' if row['passed'] else 'FAIL'} {row['name']}: {row['detail']}")
+    if strict and not result["passed"]:
+        ctx.exit(1)
+
+
+@fyers.command("sync-daily")
+@click.option("--start", "start_date", type=click.DateTime(formats=["%Y-%m-%d"]))
+@click.option("--end", "end_date", type=click.DateTime(formats=["%Y-%m-%d"]))
+@click.option("--days", type=click.IntRange(min=1, max=5000), default=550, show_default=True)
+def sync_daily_command(start_date: datetime | None, end_date: datetime | None, days: int) -> None:
+    """Backfill immutable completed FYERS daily bars; never fetch an incomplete day."""
+    from dotenv import load_dotenv
+
+    from src.execution.fyers import FyersClient
+    from src.fyers.daily_data import sync_daily_history
+    from src.fyers.models import environment_path
+    from src.fyers.sessions import IST
+
+    config = RuntimeConfig.load()
+    now = datetime.now(IST)
+    completed = now.date() if now.strftime("%H:%M") > config.session_end else now.date() - timedelta(days=1)
+    end = end_date.date() if end_date else completed
+    start = start_date.date() if start_date else end - timedelta(days=days - 1)
+    load_dotenv(environment_path(), override=False)
+
+    async def run() -> list:
+        client = FyersClient.from_env()
+        try:
+            return await sync_daily_history(client, config, start=start, end=end)
+        finally:
+            await client.close()
+
+    try:
+        artifacts = asyncio.run(run())
+    except Exception:
+        raise click.ClickException("Daily-bar sync failed; check token, calendar and FYERS connectivity") from None
+    click.echo(json.dumps({"start": start.isoformat(), "end": end.isoformat(),
+                           "sessions": len(artifacts), "live_enabled": False}, indent=2))
+
+
+@fyers.command("finalize-session")
+@click.option("--date", "session_date", type=click.DateTime(formats=["%Y-%m-%d"]), required=True)
+def finalize_session_command(session_date: datetime) -> None:
+    """Finalize one completed session into bars, quality evidence and backup."""
+    from src.fyers.operations import finalize_session
+    result = asyncio.run(finalize_session(RuntimeConfig.load(), session_date.date()))
+    click.echo(json.dumps(result, indent=2))
+    if result["status"] != "complete":
+        raise click.ClickException("Session finalization is incomplete; inspect the reported steps")
+
+
 @fyers.command("restore-drill")
 @click.option("--backup", "backup_path", type=click.Path(exists=True, path_type=Path), required=True)
 @click.option("--output-directory", type=click.Path(path_type=Path), required=True)
@@ -125,6 +189,24 @@ def costs(notional: float) -> None:
     for delivery in (False, True):
         total = sum(model.fee(notional, side, delivery=delivery, charge_dp=delivery and side == Side.SELL) for side in Side)
         click.echo(f"{'Delivery' if delivery else 'Intraday'} round trip: INR {total:.4f}; excludes spread/slippage")
+
+
+@fyers.command("reconcile-ledger")
+@click.argument("report", type=click.Path(exists=True, path_type=Path))
+@click.option("--tolerance-inr", type=click.FloatRange(min=0), default=1.0, show_default=True)
+def reconcile_ledger_command(report: Path, tolerance_inr: float) -> None:
+    """Import a normalized FYERS charge report read-only and compare modelled fees."""
+    from src.fyers.ledger_import import reconcile_ledger_export
+
+    config = RuntimeConfig.load()
+    journal = Journal(ROOT / config.database)
+    try:
+        result = reconcile_ledger_export(report, journal, tolerance_inr=tolerance_inr)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
+    finally:
+        journal.close()
+    click.echo(json.dumps(result, indent=2))
 
 
 @fyers.command("quality")

@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from types import SimpleNamespace
 import yaml
 
 from src.fyers.journal import Journal
@@ -104,7 +105,13 @@ def test_regime_decision_is_frozen_once_per_day(tmp_path, monkeypatch):
     index = pd.date_range("2025-01-01", periods=300, freq="B")
     base = 100 * np.exp(np.arange(300) * .001)
     synthetic = pd.DataFrame({member.symbol: base for member in lab.universe.members}, index=index)
-    monkeypatch.setattr(lab, "_daily_panel", lambda *_: synthetic)
+    benchmark = pd.Series(base, index=index, name="NSE:NIFTY50-INDEX")
+    artifact = SimpleNamespace(session_date=index[-1].date(), content_sha256="a" * 64,
+                               missing_symbols=[])
+    monkeypatch.setattr("src.shadow.continuous.completed_bar_panel",
+                        lambda *_args, **_kwargs: (synthetic, synthetic, benchmark, [artifact]))
+    monkeypatch.setattr(lab, "_evaluate_regime_families", lambda *_: None)
+    monkeypatch.setattr(lab, "_record_family_previews", lambda *_: None)
     journal = Journal(tmp_path / runtime.database)
     now = 1_800_000_000
     with journal.db:

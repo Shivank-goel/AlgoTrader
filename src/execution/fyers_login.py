@@ -9,11 +9,12 @@ from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
 import aiohttp
+import yaml
 from aiohttp import web
 from dotenv import dotenv_values, set_key
-import yaml
 
 from src.execution.fyers import FyersClient, FyersGatewayError
+from src.fyers.models import environment_path
 
 ROOT = Path(__file__).resolve().parents[2]
 CALLBACK_HANDLER = web.AppKey("callback_handler", object)
@@ -42,7 +43,7 @@ async def exchange_code(base_url: str, app_id: str, secret: str, code: str) -> s
                 if response.status != 200:
                     raise FyersGatewayError(f"Token exchange failed: HTTP {response.status}")
                 body = await response.json(content_type=None)
-    except (aiohttp.ClientError, ValueError, asyncio.TimeoutError):
+    except (TimeoutError, aiohttp.ClientError, ValueError):
         raise FyersGatewayError("Token exchange failed; restart login") from None
     if (not isinstance(body, dict) or body.get("s") != "ok"
             or not isinstance(body.get("access_token"), str) or not body["access_token"].strip()):
@@ -69,7 +70,7 @@ def make_app(state: str, completed: asyncio.Future[str]) -> web.Application:
 
 
 async def login() -> None:
-    env_path = ROOT / ".env"
+    env_path = environment_path()
     values = dotenv_values(env_path)
     required = ("FYERS_APP_ID", "FYERS_APP_SECRET", "FYERS_REDIRECT_URI")
     if any(not (values.get(key) or "").strip() for key in required):
@@ -113,7 +114,7 @@ def main() -> None:
         asyncio.run(login())
     except KeyboardInterrupt:
         print("Login cancelled.")
-    except (ValueError, OSError, FyersGatewayError, asyncio.TimeoutError):
+    except (TimeoutError, ValueError, OSError, FyersGatewayError):
         # Exceptions may contain credentials or callback query parameters.
         print("Login failed. Check .env, port availability and network, then retry.")
         raise SystemExit(1) from None

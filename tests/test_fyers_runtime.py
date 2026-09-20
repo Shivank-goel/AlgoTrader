@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -28,7 +28,7 @@ def setup(tmp_path):
 
 def intent(side=Side.BUY, key="one", qty=1):
     return Intent(intent_id=key, strategy="qualified_test_fixture", symbol="NSE:SBIN-EQ", side=side,
-                  quantity=qty, created_at=datetime.fromtimestamp(1000, timezone.utc))
+                  quantity=qty, created_at=datetime.fromtimestamp(1000, UTC))
 
 
 def test_duplicate_fill_and_restart_are_idempotent(setup):
@@ -83,6 +83,8 @@ def test_dp_charged_once_per_isin_day(setup):
     assert first["fee"] - second["fee"] == pytest.approx(14.75)
     assert journal.db.execute("SELECT quantity FROM positions").fetchone()[0] == 0
     assert journal.db.execute("SELECT COUNT(*) FROM settlement_obligations").fetchone()[0] == 3
+    assert journal.db.execute("SELECT SUM(remaining) FROM tax_lots").fetchone()[0] == 0
+    assert journal.db.execute("SELECT SUM(quantity) FROM realized_tax_lots").fetchone()[0] == 2
 
 
 def test_persisted_halt_survives_database_reopen(tmp_path):
@@ -150,6 +152,7 @@ def test_qualification_recomputes_and_invalidates_changed_registry(tmp_path, mon
     original_root = ROOT
     (tmp_path / "config").mkdir()
     (tmp_path / "config/fyers_costs.yaml").write_bytes((original_root / "config/fyers_costs.yaml").read_bytes())
+    (tmp_path / "config/fyers_economics.yaml").write_bytes((original_root / "config/fyers_economics.yaml").read_bytes())
     monkeypatch.setattr("src.fyers.qualification.ROOT", tmp_path)
 
     # Synthetic unit fixture, never registered in the repository's trial history.
@@ -172,7 +175,21 @@ def test_qualification_recomputes_and_invalidates_changed_registry(tmp_path, mon
         "data_path": str(data), "data_sha256": digest(data),
         "reviewed_net_costs_and_data": True, "net_returns": returns,
         "forward_evidence": {"accepted": True, "observations": 20,
-                             "selector_sha256": "a" * 64},
+                             "selector_sha256": "a" * 64,
+                             "start": "2025-01-01T00:00:00+00:00",
+                             "end": "2025-07-03T00:00:00+00:00"},
+        "capital_inr": 10000,
+        "economic_evidence": {"benchmark_id": "NIFTY200_MOMENTUM30_TRI",
+                              "benchmark_artifact_path": str(data),
+                              "benchmark_artifact_sha256": digest(data),
+                              "excess_lower_confidence_bound": 0.01,
+                              "after_tax_and_infrastructure_excess": 0.1,
+                              "tax_policy_sha256": digest(tmp_path / "config/fyers_economics.yaml"),
+                              "break_even_capital_inr": 5000},
+        "holdout_evidence": {"untouched_before_evaluation": True,
+                             "experiment_id": "fixture-holdout",
+                             "mean_excess_return": 0.1,
+                             "report_path": str(data), "report_sha256": digest(data)},
         "code_artifacts": {str(code.relative_to(tmp_path)): digest(code)},
         "config_artifacts": {str(config.relative_to(tmp_path)): digest(config)}}))
     assert qualification(evidence, trials) == (True, "fixture")
@@ -295,6 +312,7 @@ async def test_observer_monitors_existing_position_without_intents(tmp_path, mon
     import asyncio
     import time
     from unittest.mock import AsyncMock, MagicMock
+
     from src.fyers import runtime
 
     config = RuntimeConfig.load().model_copy(update={"database": str(tmp_path / "runtime.db")})
@@ -305,7 +323,7 @@ async def test_observer_monitors_existing_position_without_intents(tmp_path, mon
     broker = PaperBroker(journal, config, FyersCosts.load())
     quote = Quote(symbol=symbol, bid=99, ask=100, bid_size=100, ask_size=100,
                   received_time=now, exchange_time=now)
-    request = intent(qty=10).model_copy(update={"created_at": datetime.fromtimestamp(now, timezone.utc)})
+    request = intent(qty=10).model_copy(update={"created_at": datetime.fromtimestamp(now, UTC)})
     with patch("src.fyers.paper.qualification", return_value=(True, "qualified_test_fixture")):
         broker.fill(request, instrument, {symbol: quote}, now=now, market_open=True)
     journal.close()

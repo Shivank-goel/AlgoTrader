@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class ExperimentSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False, revalidate_instances="always")
-    schema_version: int = Field(default=1, ge=1, le=1)
+    schema_version: int = Field(default=1, ge=1, le=2)
     experiment_id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,100}$")
     parent_experiment_id: str | None = None
     hypothesis: str = Field(min_length=1)
@@ -38,6 +38,8 @@ class ExperimentSpec(BaseModel):
     holdout_end: datetime
     max_drawdown: float = Field(gt=0, lt=1)
     bootstrap_block: int = Field(ge=1, strict=True)
+    evaluation_stage: Literal["development", "holdout"] = "development"
+    rejection_rules: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def chronology(self):
@@ -50,6 +52,11 @@ class ExperimentSpec(BaseModel):
             raise ValueError("Duplicate universe members")
         if self.parent_experiment_id == self.experiment_id:
             raise ValueError("An experiment cannot parent itself")
+        if self.evaluation_stage == "holdout" and not self.parent_experiment_id:
+            raise ValueError("A holdout experiment requires a published parent experiment")
+        if self.schema_version >= 2 and (not self.rejection_rules
+                                         or any(not rule.strip() for rule in self.rejection_rules)):
+            raise ValueError("Version 2 experiments require explicit rejection rules")
         return self
 
 
@@ -66,7 +73,7 @@ class ExperimentOutput(BaseModel):
             raise ValueError("Output series must be paired")
         if any(t.tzinfo is None or t.utcoffset() is None for t in self.timestamps):
             raise ValueError("Output timestamps must be timezone-aware")
-        if any(a >= b for a, b in zip(self.timestamps, self.timestamps[1:])):
+        if any(a >= b for a, b in zip(self.timestamps, self.timestamps[1:], strict=False)):
             raise ValueError("Output timestamps must increase strictly")
         if any(r <= -1 for r in self.net_returns + self.baseline_returns):
             raise ValueError("Returns imply insolvency or invalid accounting")

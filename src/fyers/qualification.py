@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from datetime import datetime
 from pathlib import Path
 
 from src.backtest.statistics import evaluate
@@ -55,8 +56,41 @@ def qualification(path: Path, trials_path: Path) -> tuple[bool, str]:
         if (not isinstance(forward, dict) or forward.get("accepted") is not True
                 or type(forward.get("observations")) is not int or forward["observations"] < 20
                 or not isinstance(forward.get("selector_sha256"), str)
-                or len(forward["selector_sha256"]) != 64):
+                or len(forward["selector_sha256"]) != 64
+                or not isinstance(forward.get("start"), str)
+                or not isinstance(forward.get("end"), str)
+                or (datetime.fromisoformat(forward["end"]) -
+                    datetime.fromisoformat(forward["start"])).days < 182):
             return False, "forward evidence has not been reviewed and accepted"
+        economics = evidence.get("economic_evidence")
+        if (not isinstance(economics, dict)
+                or not isinstance(economics.get("benchmark_id"), str)
+                or not (economics["benchmark_id"] == "NIFTY200_MOMENTUM30_TRI"
+                        or economics["benchmark_id"].startswith("AMFI:"))
+                or not isinstance(economics.get("benchmark_artifact_path"), str)
+                or not isinstance(economics.get("benchmark_artifact_sha256"), str)
+                or economics["benchmark_artifact_sha256"] != digest(
+                    ROOT / economics["benchmark_artifact_path"])
+                or not isinstance(economics.get("excess_lower_confidence_bound"), int | float)
+                or economics["excess_lower_confidence_bound"] <= 0
+                or not isinstance(economics.get("after_tax_and_infrastructure_excess"), int | float)
+                or economics["after_tax_and_infrastructure_excess"] <= 0
+                or not isinstance(economics.get("tax_policy_sha256"), str)
+                or economics["tax_policy_sha256"] != digest(ROOT / "config/fyers_economics.yaml")
+                or not isinstance(economics.get("break_even_capital_inr"), int | float)
+                or economics["break_even_capital_inr"] > evidence.get("capital_inr", 10000)):
+            return False, "benchmark-relative economic evidence failed"
+        holdout = evidence.get("holdout_evidence")
+        if (not isinstance(holdout, dict)
+                or holdout.get("untouched_before_evaluation") is not True
+                or not isinstance(holdout.get("experiment_id"), str)
+                or not holdout["experiment_id"]
+                or not isinstance(holdout.get("mean_excess_return"), int | float)
+                or holdout["mean_excess_return"] <= 0
+                or not isinstance(holdout.get("report_path"), str)
+                or not isinstance(holdout.get("report_sha256"), str)
+                or holdout["report_sha256"] != digest(ROOT / holdout["report_path"])):
+            return False, "sealed holdout evidence failed"
         returns = evidence["net_returns"]
         if not isinstance(returns, list) or len(returns) < 100 or any(isinstance(x, bool) or not isinstance(x, int | float) or not math.isfinite(x) for x in returns):
             return False, "need at least 100 finite net observations"

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import math
 import os
 from datetime import date
@@ -16,6 +15,10 @@ import yaml
 
 class FyersGatewayError(Exception):
     """FYERS returned an error or an unusable response."""
+
+
+class FyersAuthenticationError(FyersGatewayError):
+    """FYERS rejected the daily access token; operator action is required."""
 
 
 class FyersClient:
@@ -64,12 +67,21 @@ class FyersClient:
             base = self.base_url.removesuffix("/api/v3") + "/data" if market_data else self.base_url
             options = {"params": params} if params is not None else {}
             async with self._session.get(f"{base}/{path}", allow_redirects=False, **options) as response:
+                if response.status in {401, 403}:
+                    raise FyersAuthenticationError(f"FYERS {path}: authentication required")
                 if response.status != 200:
                     raise FyersGatewayError(f"FYERS {path}: HTTP {response.status}")
                 body = await response.json(content_type=None)
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+        except FyersAuthenticationError:
+            raise
+        except (TimeoutError, aiohttp.ClientError, ValueError):
             # Do not include response bodies, headers or tokens in errors.
             raise FyersGatewayError(f"FYERS {path}: transport or invalid JSON response") from None
+        if isinstance(body, dict) and body.get("s") != "ok":
+            code = body.get("code")
+            message = str(body.get("message", "")).lower()
+            if code in {-15, -16, -17} or any(word in message for word in ("token", "auth", "expired")):
+                raise FyersAuthenticationError(f"FYERS {path}: authentication required")
         if not isinstance(body, dict) or body.get("s") != "ok":
             raise FyersGatewayError(f"FYERS {path}: API error or invalid response envelope")
         return body
@@ -132,13 +144,13 @@ class FyersClient:
         candles = body.get("candles")
         if not isinstance(candles, list) or any(
             not isinstance(row, list) or len(row) != 6
-            or any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in row)
+            or any(isinstance(x, bool) or not isinstance(x, int | float) or not math.isfinite(x) for x in row)
             or row[0] <= 0 or min(row[1:5]) <= 0 or row[5] < 0
             or row[2] < max(row[1], row[3], row[4])
             or row[3] > min(row[1], row[2], row[4])
             for row in candles
         ):
             raise FyersGatewayError("FYERS history: invalid candle response")
-        if any(b[0] <= a[0] for a, b in zip(candles, candles[1:])):
+        if any(b[0] <= a[0] for a, b in zip(candles, candles[1:], strict=False)):
             raise FyersGatewayError("FYERS history: duplicate or unordered candles")
         return body

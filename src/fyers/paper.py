@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import json
 import math
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from src.fyers.costs import FyersCosts
 from src.fyers.economics import estimate_fill, settlement_day
 from src.fyers.journal import Journal
-from src.fyers.models import Instrument, Intent, Quote, ROOT, RuntimeConfig, Side
+from src.fyers.models import ROOT, Instrument, Intent, Quote, RuntimeConfig, Side
 from src.fyers.qualification import qualification
 
 
@@ -25,6 +25,46 @@ class PaperBroker:
                 raise ValueError("Capital differs from persisted paper account")
             if journal.get("position_cost_basis") is None:
                 self._recover_accounting()
+            if not journal.db.execute("SELECT 1 FROM tax_lots LIMIT 1").fetchone():
+                self._recover_tax_lots()
+
+    def _recover_tax_lots(self) -> None:
+        """Additive FIFO tax-lot migration derived only from immutable fill history."""
+        for row in self.journal.db.execute("SELECT * FROM fills ORDER BY timestamp,rowid"):
+            if row["side"] == Side.BUY.value:
+                unit = (row["price"] * row["quantity"] + row["fee"]) / row["quantity"]
+                self.journal.db.execute(
+                    "INSERT OR IGNORE INTO tax_lots VALUES(?,?,?,?,?)",
+                    (row["intent_id"], row["symbol"], row["timestamp"], row["quantity"], unit),
+                )
+            else:
+                self._consume_tax_lots(row["intent_id"], row["symbol"], row["quantity"],
+                                       row["price"] * row["quantity"] - row["fee"], row["timestamp"])
+
+    def _consume_tax_lots(self, execution_id: str, symbol: str, quantity: int,
+                          proceeds: float, sold_at: float) -> None:
+        remaining = quantity
+        for lot in self.journal.db.execute(
+            "SELECT * FROM tax_lots WHERE symbol=? AND remaining>0 ORDER BY acquired_at,lot_id",
+            (symbol,),
+        ).fetchall():
+            used = min(remaining, lot["remaining"])
+            allocated = proceeds * used / quantity
+            basis = lot["unit_cost"] * used
+            holding_days = max(0, int((sold_at - lot["acquired_at"]) // 86400))
+            self.journal.db.execute(
+                "INSERT OR IGNORE INTO realized_tax_lots VALUES(?,?,?,?,?,?,?,?,?)",
+                (execution_id, lot["lot_id"], symbol, sold_at, used, allocated, basis,
+                 allocated - basis, holding_days),
+            )
+            self.journal.db.execute(
+                "UPDATE tax_lots SET remaining=remaining-? WHERE lot_id=?", (used, lot["lot_id"]),
+            )
+            remaining -= used
+            if remaining == 0:
+                break
+        if remaining:
+            raise ValueError("Paper positions and FIFO tax lots do not reconcile")
 
     def _recover_accounting(self) -> None:
         """Upgrade legacy journals from committed fills without moving cash."""
@@ -166,10 +206,16 @@ class PaperBroker:
             basis = self.journal.get("position_cost_basis")
             if buy:
                 basis[intent.symbol] = basis.get(intent.symbol, 0.0) + notional + fee
+                db.execute("INSERT INTO tax_lots VALUES(?,?,?,?,?)", (
+                    intent.intent_id, intent.symbol, now, intent.quantity,
+                    (notional + fee) / intent.quantity,
+                ))
             else:
                 released = basis[intent.symbol] * intent.quantity / held
                 basis[intent.symbol] -= released
                 self.journal.put("realized_pnl", self.journal.get("realized_pnl") + notional - fee - released)
+                self._consume_tax_lots(intent.intent_id, intent.symbol, intent.quantity,
+                                       notional - fee, now)
             self.journal.put("position_cost_basis", basis)
             self.journal.put("total_fees", self.journal.get("total_fees") + fee)
             self.journal.put("cash", new_cash)
@@ -177,6 +223,9 @@ class PaperBroker:
             if not buy:
                 db.execute("INSERT OR IGNORE INTO dp_charges VALUES(?,?)", (instrument.isin, day))
             db.execute("INSERT INTO fills VALUES(?,?,?,?,?,?,?,?)", (intent.intent_id, encoded, intent.symbol, intent.side.value, intent.quantity, price, fee, now))
+            db.execute("INSERT INTO paper_orders VALUES(?,?,?,?,?,?,?)", (
+                intent.intent_id, encoded, intent.quantity, intent.quantity, "FILLED", now, now,
+            ))
             due = settlement_day(datetime.fromtimestamp(now, ZoneInfo("Asia/Kolkata")).date())
             db.execute("INSERT INTO settlement_obligations VALUES(?,?,?,?,?,?,?)",
                        (intent.intent_id, day, due.isoformat(), intent.symbol,

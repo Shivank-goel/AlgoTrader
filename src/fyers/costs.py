@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from datetime import date
+from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
 import yaml
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.fyers.models import ROOT, Side
 

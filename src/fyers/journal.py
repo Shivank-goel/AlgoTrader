@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import sqlite3
 import time
+from pathlib import Path
 
 
 class Journal:
@@ -36,6 +36,22 @@ class Journal:
                 intent_id TEXT PRIMARY KEY, trade_day TEXT NOT NULL, due_day TEXT NOT NULL,
                 symbol TEXT NOT NULL, side TEXT NOT NULL, quantity INTEGER NOT NULL,
                 cash_amount REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS tax_lots (
+                lot_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, acquired_at REAL NOT NULL,
+                remaining INTEGER NOT NULL CHECK(remaining>=0), unit_cost REAL NOT NULL CHECK(unit_cost>0));
+            CREATE TABLE IF NOT EXISTS realized_tax_lots (
+                execution_id TEXT NOT NULL, lot_id TEXT NOT NULL, symbol TEXT NOT NULL,
+                sold_at REAL NOT NULL, quantity INTEGER NOT NULL CHECK(quantity>0),
+                proceeds REAL NOT NULL, cost_basis REAL NOT NULL, gain REAL NOT NULL,
+                holding_days INTEGER NOT NULL CHECK(holding_days>=0),
+                PRIMARY KEY(execution_id,lot_id));
+            CREATE TABLE IF NOT EXISTS paper_orders (
+                intent_id TEXT PRIMARY KEY, intent TEXT NOT NULL, requested INTEGER NOT NULL,
+                filled INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL,
+                created REAL NOT NULL, updated REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS paper_intent_dispatch (
+                intent_id TEXT PRIMARY KEY, status TEXT NOT NULL, detail TEXT,
+                updated REAL NOT NULL);
         """)
 
     def event(self, kind: str, payload: dict, received: float | None = None) -> None:

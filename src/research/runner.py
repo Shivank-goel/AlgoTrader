@@ -6,8 +6,8 @@ Interrupted runs cannot be rerun automatically under the same experiment ID.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from src.backtest.statistics import Trial, TrialsRegistry, sharpe_ratio, t_statistic
 from src.research.models import ExperimentOutput, ExperimentResult, ExperimentSpec
@@ -51,7 +51,8 @@ def publish_trial(registry: ExperimentRegistry, experiment_id: str, trials_path:
         trials.record_once(trial)
         if result["status"] == "completed":
             payload = report(spec, ExperimentOutput.model_validate(result["output"]),
-                             n_trials=trials.count, trial_sharpe_std=trials.sharpe_std())
+                             n_trials=trials.count, trial_sharpe_std=trials.sharpe_std(),
+                             campaign_trials=registry.campaign_trial_count(experiment_id))
         else:
             payload = {"qualification": False, "status": "failed", "error_type": result["error_type"],
                        "full_trial_count": trials.count}
@@ -62,14 +63,16 @@ def publish_trial(registry: ExperimentRegistry, experiment_id: str, trials_path:
 
 
 def run_once(registry: ExperimentRegistry, experiment_id: str, root: Path, trials_path: Path,
-             backtest: Callable[[ExperimentSpec], ExperimentOutput]) -> dict:
+             backtest: Callable[[ExperimentSpec], ExperimentOutput], *, holdout: bool = False) -> dict:
     with registry.execution_lock(experiment_id):
-        return _run_once(registry, experiment_id, root, trials_path, backtest)
+        return _run_once(registry, experiment_id, root, trials_path, backtest, holdout=holdout)
 
 
 def _run_once(registry: ExperimentRegistry, experiment_id: str, root: Path, trials_path: Path,
-              backtest: Callable[[ExperimentSpec], ExperimentOutput]) -> dict:
+              backtest: Callable[[ExperimentSpec], ExperimentOutput], *, holdout: bool = False) -> dict:
     spec = registry.spec(experiment_id)
+    if (spec.evaluation_stage == "holdout") != holdout:
+        raise ValueError("Use research evaluate-holdout for holdout experiments")
     frozen_spec = canonical(spec.model_dump(mode="json"))
     verify_artifacts(root, spec)
     # Validate the full trial history before spending a registered experiment.

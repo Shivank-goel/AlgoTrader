@@ -17,8 +17,10 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.fyers.costs import FyersCosts
+from src.fyers.daily_data import completed_bar_panel
 from src.fyers.journal import Journal
 from src.fyers.models import ROOT, RuntimeConfig, Side
+from src.fyers.sessions import NseSessionCalendar
 from src.fyers.universe import ForwardUniverse
 from src.strategies.nse_regime_selector import RegimeAwareSelector, SelectorConfig, StrategyFamily
 
@@ -54,6 +56,7 @@ class StrategyLabConfig(BaseModel):
     candidates: list[StrategyCandidate] = Field(default_factory=list, max_length=50)
     universe_file: str | None = None
     regime_selector: SelectorConfig | None = None
+    forward_holding_sessions: int = Field(default=5, ge=1, le=252)
 
     @model_validator(mode="after")
     def unique_candidates(self) -> StrategyLabConfig:
@@ -110,99 +113,173 @@ class ContinuousStrategyLab:
                     targets TEXT NOT NULL, entry_prices TEXT NOT NULL, benchmark_prices TEXT NOT NULL,
                     evaluated_at REAL, net_return REAL, benchmark_return REAL, excess_return REAL,
                     PRIMARY KEY(family,decision_day));
+                CREATE TABLE IF NOT EXISTS regime_forward_observations_v2 (
+                    family TEXT NOT NULL, decision_day TEXT NOT NULL,
+                    selector_sha256 TEXT NOT NULL, decision_bar_sha256 TEXT NOT NULL,
+                    entry_day TEXT NOT NULL, due_day TEXT NOT NULL, targets TEXT NOT NULL,
+                    entry_prices TEXT, benchmark_entry REAL, evaluated_day TEXT,
+                    outcome TEXT, net_return REAL, benchmark_return REAL, excess_return REAL,
+                    PRIMARY KEY(family,decision_day));
             """)
 
-    def _evaluate_regime_families(self, journal: Journal, quotes: dict[str, dict], now: float) -> None:
+    def _evaluate_regime_families(self, journal: Journal, closes: pd.DataFrame,
+                                  opens: pd.DataFrame, benchmark: pd.Series,
+                                  artifacts: list) -> None:
+        if not artifacts:
+            return
+        available = {artifact.session_date.isoformat(): index
+                     for index, artifact in enumerate(artifacts)}
+        latest = artifacts[-1].session_date.isoformat()
         rows = journal.db.execute(
-            "SELECT * FROM regime_family_observations WHERE evaluated_at IS NULL AND due_at<=?",
-            (now,),
+            "SELECT * FROM regime_forward_observations_v2 WHERE outcome IS NULL "
+            "ORDER BY decision_day"
         ).fetchall()
         for row in rows:
             targets = json.loads(row["targets"])
-            entry = json.loads(row["entry_prices"])
-            benchmark = json.loads(row["benchmark_prices"])
-            if not targets or any(symbol not in quotes for symbol in set(targets) | set(benchmark)):
+            entry = json.loads(row["entry_prices"]) if row["entry_prices"] else None
+            if entry is None and row["entry_day"] in available:
+                index = available[row["entry_day"]]
+                prices = opens.iloc[index]
+                if any(pd.isna(prices.get(symbol)) for symbol in targets) or pd.isna(benchmark.iloc[index]):
+                    with journal.db:
+                        journal.db.execute(
+                            "UPDATE regime_forward_observations_v2 SET outcome='ENTRY_MISSING' "
+                            "WHERE family=? AND decision_day=?", (row["family"], row["decision_day"]),
+                        )
+                    continue
+                entry = {symbol: float(prices[symbol]) * (1 + self.runtime.slippage_bps / 10000)
+                         for symbol in targets}
+                with journal.db:
+                    journal.db.execute(
+                        "UPDATE regime_forward_observations_v2 SET entry_prices=?,benchmark_entry=? "
+                        "WHERE family=? AND decision_day=?",
+                        (json.dumps(entry, sort_keys=True), float(benchmark.iloc[index]),
+                         row["family"], row["decision_day"]),
+                    )
+            elif entry is None and latest > row["entry_day"]:
+                with journal.db:
+                    journal.db.execute(
+                        "UPDATE regime_forward_observations_v2 SET outcome='ENTRY_SESSION_MISSING' "
+                        "WHERE family=? AND decision_day=?", (row["family"], row["decision_day"]),
+                    )
                 continue
-            capital = sum(quantity * entry[symbol] for symbol, quantity in targets.items())
-            exit_value = sum(quantity * quotes[symbol]["bid"] for symbol, quantity in targets.items())
-            fees = sum(self.costs.fee(quantity * entry[symbol], Side.BUY, delivery=True)
-                       + self.costs.fee(quantity * quotes[symbol]["bid"], Side.SELL,
-                                       delivery=True, charge_dp=True)
-                       for symbol, quantity in targets.items())
-            net = (exit_value - fees) / capital - 1
-            baseline = sum(quotes[symbol]["mid"] / price - 1
-                           for symbol, price in benchmark.items()) / len(benchmark)
+            if entry is None or latest < row["due_day"]:
+                continue
+            if row["due_day"] not in available:
+                with journal.db:
+                    journal.db.execute(
+                        "UPDATE regime_forward_observations_v2 SET outcome='EXIT_SESSION_MISSING' "
+                        "WHERE family=? AND decision_day=?", (row["family"], row["decision_day"]),
+                    )
+                continue
+            index = available[row["due_day"]]
+            exits = closes.iloc[index]
+            if any(pd.isna(exits.get(symbol)) for symbol in targets) or pd.isna(benchmark.iloc[index]):
+                outcome = "EXIT_MISSING"
+                with journal.db:
+                    journal.db.execute(
+                        "UPDATE regime_forward_observations_v2 SET outcome=? WHERE family=? AND decision_day=?",
+                        (outcome, row["family"], row["decision_day"]),
+                    )
+                continue
+            capital = self.config.regime_selector.capital_inr
+            entry_cost = 0.0
+            exit_value = 0.0
+            fees = 0.0
+            for symbol, quantity in targets.items():
+                buy_notional = quantity * entry[symbol]
+                exit_price = float(exits[symbol]) * (1 - self.runtime.slippage_bps / 10000)
+                sell_notional = quantity * exit_price
+                entry_cost += buy_notional
+                exit_value += sell_notional
+                fees += self.costs.fee(buy_notional, Side.BUY, delivery=True)
+                fees += self.costs.fee(sell_notional, Side.SELL, delivery=True, charge_dp=True)
+            net = (capital - entry_cost + exit_value - fees) / capital - 1
+            baseline = float(benchmark.iloc[index]) / float(row["benchmark_entry"]) - 1
             with journal.db:
                 journal.db.execute(
-                    "UPDATE regime_family_observations SET evaluated_at=?,net_return=?,"
-                    "benchmark_return=?,excess_return=? WHERE family=? AND decision_day=?",
-                    (now, net, baseline, net - baseline, row["family"], row["decision_day"]),
+                    "UPDATE regime_forward_observations_v2 SET evaluated_day=?,outcome='EVALUATED',"
+                    "net_return=?,benchmark_return=?,excess_return=? WHERE family=? AND decision_day=?",
+                    (row["due_day"], net, baseline, net - baseline,
+                     row["family"], row["decision_day"]),
                 )
 
     @staticmethod
     def _family_metrics(journal: Journal) -> dict:
         result = {}
         families = journal.db.execute(
-            "SELECT DISTINCT family FROM regime_family_observations ORDER BY family").fetchall()
+            "SELECT DISTINCT family FROM regime_forward_observations_v2 ORDER BY family").fetchall()
         for family_row in families:
             family = family_row[0]
-            values = [row[0] for row in journal.db.execute(
-                "SELECT net_return FROM regime_family_observations "
-                "WHERE family=? AND evaluated_at IS NOT NULL ORDER BY decision_day", (family,))]
+            rows = journal.db.execute(
+                "SELECT net_return,benchmark_return,excess_return FROM regime_forward_observations_v2 "
+                "WHERE family=? AND outcome='EVALUATED' ORDER BY decision_day", (family,)).fetchall()
+            values = [row["net_return"] for row in rows]
             pending = journal.db.execute(
-                "SELECT COUNT(*) FROM regime_family_observations "
-                "WHERE family=? AND evaluated_at IS NULL", (family,)).fetchone()[0]
+                "SELECT COUNT(*) FROM regime_forward_observations_v2 "
+                "WHERE family=? AND outcome IS NULL", (family,)).fetchone()[0]
+            rejected = journal.db.execute(
+                "SELECT COUNT(*) FROM regime_forward_observations_v2 "
+                "WHERE family=? AND outcome IS NOT NULL AND outcome!='EVALUATED'", (family,)).fetchone()[0]
+            equity = benchmark_equity = peak = 1.0
+            drawdown = 0.0
+            for row in rows:
+                equity *= 1 + row["net_return"]
+                benchmark_equity *= 1 + row["benchmark_return"]
+                peak = max(peak, equity)
+                drawdown = max(drawdown, 1 - equity / peak)
             result[family] = {"completed": len(values), "pending": pending,
+                              "rejected": rejected,
+                              "net_return": equity - 1 if rows else None,
+                              "benchmark_return": benchmark_equity - 1 if rows else None,
+                              "excess_return": equity - benchmark_equity if rows else None,
+                              "max_drawdown": drawdown if rows else None,
                               "mean_net_return": sum(values) / len(values) if values else None,
                               "win_rate": sum(value > 0 for value in values) / len(values) if values else None}
         return result
 
-    def _record_family_previews(self, journal: Journal, previews: list[dict],
-                                quotes: dict[str, dict], day: str, now: float) -> None:
-        benchmark = {symbol: quote["mid"] for symbol, quote in quotes.items()}
+    def _record_family_previews(self, journal: Journal, previews: list[dict], day: str,
+                                selector_sha256: str, bar_sha256: str) -> None:
+        calendar = NseSessionCalendar(ROOT / self.runtime.holidays_file,
+                                      self.runtime.session_start, self.runtime.session_end)
+        decision_day = datetime.fromisoformat(day).date()
+        entry_day = calendar.trading_day_offset(decision_day, 1)
+        due_day = calendar.trading_day_offset(
+            entry_day, self.config.forward_holding_sessions - 1,
+        )
         for preview in previews:
             family, targets = preview["family"], preview["hypothetical_targets"]
             if not targets or journal.db.execute(
-                "SELECT 1 FROM regime_family_observations WHERE family=? AND evaluated_at IS NULL",
+                "SELECT 1 FROM regime_forward_observations_v2 WHERE family=? AND outcome IS NULL",
                 (family,),
             ).fetchone():
                 continue
-            entry = {symbol: quotes[symbol]["ask"] for symbol in targets}
             with journal.db:
                 journal.db.execute(
-                    "INSERT OR IGNORE INTO regime_family_observations "
-                    "(family,decision_day,due_at,targets,entry_prices,benchmark_prices) "
-                    "VALUES(?,?,?,?,?,?)",
-                    (family, day, now + 7 * 86400, json.dumps(targets, sort_keys=True),
-                     json.dumps(entry, sort_keys=True), json.dumps(benchmark, sort_keys=True)),
+                    "INSERT OR IGNORE INTO regime_forward_observations_v2 "
+                    "(family,decision_day,selector_sha256,decision_bar_sha256,entry_day,due_day,targets) "
+                    "VALUES(?,?,?,?,?,?,?)",
+                    (family, day, selector_sha256, bar_sha256, entry_day.isoformat(),
+                     due_day.isoformat(), json.dumps(targets, sort_keys=True)),
                 )
-
-    def _daily_panel(self, quotes: dict[str, dict], now: float) -> pd.DataFrame:
-        frames = {}
-        for member in self.universe.members:
-            ticker = member.symbol.removeprefix("NSE:").removesuffix("-EQ")
-            path = ROOT / "data/nse/hist" / f"{ticker}_1d.parquet"
-            if not path.exists():
-                continue
-            frames[member.symbol] = pd.read_parquet(path, columns=["close"])["close"]
-        panel = pd.DataFrame(frames).sort_index()
-        if quotes:
-            day = pd.Timestamp.fromtimestamp(now, tz="Asia/Kolkata").tz_localize(None).normalize()
-            panel.loc[day, list(quotes)] = [quotes[symbol]["mid"] for symbol in quotes]
-        return panel.sort_index()
 
     def _selector_status(self, journal: Journal, now: float) -> dict:
         if self.selector is None:
             return {"state": "disabled", "selected_family": None}
         assert self.universe is not None
         symbols = [row.symbol for row in self.universe.members]
-        quotes = self._quotes(journal, symbols, now)
-        if len(quotes) < 10:
-            return {"state": "waiting_for_fresh_quotes", "fresh_symbols": len(quotes),
-                    "required_symbols": 10, "selected_family": None}
-        panel = self._daily_panel(quotes, now)
-        self._evaluate_regime_families(journal, quotes, now)
-        decision = self.selector.select(panel)
+        panel, opens, benchmark, artifacts = completed_bar_panel(
+            ROOT / self.runtime.daily_bars_directory, symbols,
+        )
+        if not artifacts:
+            return {"state": "waiting_for_completed_bars", "selected_family": None,
+                    "reason": "run fyers sync-daily after the market closes"}
+        self._evaluate_regime_families(journal, panel, opens, benchmark, artifacts)
+        decision = self.selector.select(panel, benchmark)
+        data_manifest_sha256 = hashlib.sha256(json.dumps(
+            [(row.session_date.isoformat(), row.content_sha256) for row in artifacts],
+            separators=(",", ":"),
+        ).encode()).hexdigest()
         previews = []
         for name in decision["eligible_families"]:
             family = StrategyFamily(name)
@@ -212,10 +289,16 @@ class ContinuousStrategyLab:
                              "hypothetical_targets": targets, "rejected": rejected})
         payload = {**decision, "state": "observation_only", "universe_id": self.universe.universe_id,
                    "warmup_bars": len(panel), "required_warmup_bars": 253,
+                   "last_completed_bar": artifacts[-1].session_date.isoformat(),
+                   "bar_data_sha256": data_manifest_sha256,
+                   "missing_symbols": artifacts[-1].missing_symbols,
                    "family_previews": previews, "execution": "observation_only"}
         assert self.config.regime_selector is not None
         identity = hashlib.sha256(self.config.regime_selector.model_dump_json().encode()).hexdigest()
-        day = pd.Timestamp.fromtimestamp(now, tz="Asia/Kolkata").date().isoformat()
+        identity = hashlib.sha256(
+            (identity + self.universe.source_sha256).encode()
+        ).hexdigest()
+        day = artifacts[-1].session_date.isoformat()
         old = journal.db.execute("SELECT selector_sha256,payload FROM regime_decisions WHERE decision_day=?",
                                  (day,)).fetchone()
         if old and old["selector_sha256"] != identity:
@@ -223,15 +306,13 @@ class ContinuousStrategyLab:
         if old:
             current = json.loads(old["payload"])
             current["family_metrics"] = self._family_metrics(journal)
+            current["paper_schedule"] = self._maybe_schedule_latest(journal, current, now)
             return current
-        self._record_family_previews(journal, previews, quotes, day, now)
+        self._record_family_previews(
+            journal, previews, day, identity, data_manifest_sha256,
+        )
         payload["family_metrics"] = self._family_metrics(journal)
-        if decision["selected_family"]:
-            selected = next(row for row in previews if row["family"] == decision["selected_family"])
-            payload["paper_schedule"] = self._schedule_paper(
-                journal, selected["hypothetical_targets"], decision["selected_family"], now)
-        else:
-            payload["paper_schedule"] = {"status": "blocked", "reason": decision["reason"]}
+        payload["paper_schedule"] = self._maybe_schedule_latest(journal, payload, now)
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         with journal.db:
             journal.db.execute("INSERT INTO regime_decisions VALUES(?,?,?,?,?)",
@@ -239,6 +320,27 @@ class ContinuousStrategyLab:
             journal.db.execute("INSERT INTO events(received,kind,payload) VALUES(?,?,?)",
                                (now, "regime_decision", encoded))
         return payload
+
+    def _maybe_schedule_latest(self, journal: Journal, decision: dict, now: float) -> dict:
+        if not decision.get("selected_family"):
+            return {"status": "blocked", "reason": decision.get("reason")}
+        if not self._market_open(journal, now):
+            return {"status": "waiting_for_next_session"}
+        calendar = NseSessionCalendar(ROOT / self.runtime.holidays_file,
+                                      self.runtime.session_start, self.runtime.session_end)
+        expected = calendar.trading_day_offset(
+            datetime.fromisoformat(decision["last_completed_bar"]).date(), 1,
+        )
+        today = pd.Timestamp.fromtimestamp(now, tz="Asia/Kolkata").date()
+        if today != expected:
+            return {"status": "missed_entry_session", "expected": expected.isoformat()}
+        selected = next(
+            row for row in decision.get("family_previews", [])
+            if row["family"] == decision["selected_family"]
+        )
+        return self._schedule_paper(
+            journal, selected["hypothetical_targets"], decision["selected_family"], now,
+        )
 
     def _schedule_paper(self, journal: Journal, targets: dict[str, int],
                         strategy: str, now: float) -> dict:
@@ -443,8 +545,8 @@ class ContinuousStrategyLab:
             elif not status["market_open"]:
                 status["reason"] = "waiting for a fresh FYERS NSE OPEN status"
             status["selector"] = (self._selector_status(journal, now)
-                                  if self.config.enabled and status["market_open"]
-                                  else {"state": "waiting_for_market", "selected_family": None})
+                                  if self.config.enabled
+                                  else {"state": "disabled", "selected_family": None})
             for candidate in self.config.candidates:
                 quotes = self._quotes(journal, candidate.symbols, now)
                 item = {"id": candidate.id, "kind": candidate.kind.value,

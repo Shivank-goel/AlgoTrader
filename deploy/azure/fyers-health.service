@@ -1,5 +1,7 @@
 [Unit]
-Description=Verified FYERS SQLite backup
+Description=FYERS runtime and authentication preflight
+After=network-online.target fyers-dashboard.service
+Wants=network-online.target
 
 [Service]
 Type=oneshot
@@ -8,7 +10,7 @@ Group=shivank
 WorkingDirectory=/home/shivank/AlgoTrader
 EnvironmentFile=/etc/algotrader/fyers.env
 Environment=FYERS_ENV_FILE=/etc/algotrader/fyers.env
-ExecStart=/home/shivank/AlgoTrader/.venv312/bin/python main.py fyers backup
+ExecStart=/home/shivank/AlgoTrader/.venv312/bin/python main.py fyers preflight --json --strict
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

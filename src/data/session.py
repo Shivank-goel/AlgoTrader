@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import hashlib
 import json
-from pathlib import Path
 import sqlite3
+from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -105,10 +105,10 @@ def export_session(source: Path, output: Path, *, start: float, end: float,
         db.execute("BEGIN")
         master_row = db.execute(
             "SELECT id,payload FROM events WHERE kind='instruments' AND received<=? ORDER BY id DESC LIMIT 1",
-            (start,),
+            (end,),
         ).fetchone()
         if master_row is None:
-            raise ValueError("No instrument master exists at or before the session start")
+            raise ValueError("No instrument master exists in or before the session window")
         rows = db.execute(
             "SELECT id,received,kind,payload FROM events WHERE received>=? AND received<=? ORDER BY id",
             (start, end),

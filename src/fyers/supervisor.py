@@ -6,10 +6,11 @@ import asyncio
 import os
 import sys
 import time
+from datetime import datetime, timedelta
 
 from src.fyers.journal import Journal
 from src.fyers.models import ROOT, RuntimeConfig
-from src.fyers.sessions import NseSessionCalendar
+from src.fyers.sessions import IST, NseSessionCalendar, SessionPhase
 
 
 class RecorderSupervisor:
@@ -24,6 +25,10 @@ class RecorderSupervisor:
         self.manual_stop_date: str | None = None
         self._restart_times: list[float] = []
         self._last_start_attempt = 0.0
+        self._last_finalization_attempt = 0.0
+        self._finalization_attempts = 0
+        self.finalization: dict | None = None
+        self._finalizing = False
         self._lock = asyncio.Lock()
         self._load_state()
 
@@ -31,17 +36,22 @@ class RecorderSupervisor:
         try:
             journal = Journal(ROOT / self.config.database)
             saved = journal.get("recorder_supervisor", {})
-            journal.close()
             if isinstance(saved, dict):
                 self.last_exit = saved.get("last_exit")
                 self.last_error = saved.get("last_error")
                 self.manual_stop_date = saved.get("manual_stop_date")
+                self._finalization_attempts = int(saved.get("finalization_attempts", 0))
+                self._last_finalization_attempt = float(saved.get("last_finalization_attempt", 0))
+            self.finalization = journal.get("session_finalization")
+            journal.close()
         except Exception:  # A damaged journal must not defeat the session gate.
             self.last_error = "supervisor state unavailable"
 
     def _persist(self) -> None:
         value = {"started_at": self.started_at, "last_exit": self.last_exit,
                  "last_error": self.last_error, "manual_stop_date": self.manual_stop_date,
+                 "finalization_attempts": self._finalization_attempts,
+                 "last_finalization_attempt": self._last_finalization_attempt,
                  "updated_at": time.time(), "live_enabled": False}
         try:
             journal = Journal(ROOT / self.config.database)
@@ -75,17 +85,52 @@ class RecorderSupervisor:
             self._restart_times.clear()
             self._persist()
         running = self.process is not None and self.process.returncode is None
+        from src.fyers.qualification import qualification
+
+        qualified, _ = qualification(
+            ROOT / self.config.qualification_file, ROOT / self.config.trials_file,
+        )
+        authentication = None
+        try:
+            journal = Journal(ROOT / self.config.database)
+            authentication = journal.get("authentication")
+            self.finalization = journal.get("session_finalization")
+            journal.close()
+        except Exception:
+            pass
+        if isinstance(authentication, dict) and authentication.get("state") == "AUTH_REQUIRED":
+            lifecycle = "AUTH_REQUIRED"
+        elif running:
+            lifecycle = "RECORDING"
+        elif self._finalizing:
+            lifecycle = "FINALIZING"
+        elif qualified:
+            lifecycle = "QUALIFIED_PAPER"
+        elif session.phase is SessionPhase.BEFORE_SESSION:
+            lifecycle = "PREOPEN"
+        elif isinstance(self.finalization, dict) and self.finalization.get("status") == "complete":
+            lifecycle = "RESEARCH_READY"
+        else:
+            lifecycle = "OBSERVATION_ONLY"
         return {"running": running, "pid": self.process.pid if running else None,
                 "started_at": self.started_at, "last_exit": self.last_exit,
                 "last_error": self.last_error, "session_eligible": session.eligible,
                 "session": session.as_dict(), "manual_stop": self.manual_stop_date is not None,
-                "restart_count": len(self._restart_times), "live_enabled": False}
+                "restart_count": len(self._restart_times), "live_enabled": False,
+                "lifecycle": lifecycle, "authentication": authentication,
+                "finalization": self.finalization,
+                "finalization_attempts": self._finalization_attempts,
+                "strategy_qualified": qualified}
 
     async def start(self, *, manual: bool = True) -> dict:
         async with self._lock:
             self._observe_exit()
             if self.process is not None:
                 return self.status()
+            status = self.status()
+            authentication = status.get("authentication")
+            if isinstance(authentication, dict) and authentication.get("state") == "AUTH_REQUIRED":
+                raise ValueError("FYERS authentication required; renew the daily access token")
             if not self.eligible():
                 raise ValueError("Recorder starts only during the configured NSE session")
             if manual:
@@ -122,6 +167,55 @@ class RecorderSupervisor:
         self._restart_times = [stamp for stamp in self._restart_times if now - stamp <= window]
         return len(self._restart_times) <= self.config.recorder_max_restarts
 
+    def _pending_session_date(self):
+        try:
+            journal = Journal(ROOT / self.config.database)
+            row = journal.db.execute(
+                "SELECT received FROM events WHERE kind='tick' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            finalized = journal.get("session_finalization", {})
+            journal.close()
+            if not row:
+                return None
+            day = datetime.fromtimestamp(row[0], IST).date()
+            if isinstance(finalized, dict) and finalized.get("session_date") == day.isoformat() \
+                    and finalized.get("status") == "complete":
+                return None
+            _, end = self.calendar.session_bounds(day)
+            if datetime.now(IST) < end + timedelta(minutes=self.config.finalization_delay_minutes):
+                return None
+            return day
+        except (OSError, ValueError):
+            return None
+
+    async def _finalize_pending(self) -> None:
+        day = self._pending_session_date()
+        if day is None or self._finalizing:
+            return
+        if isinstance(self.finalization, dict) and self.finalization.get("session_date") != day.isoformat():
+            self._finalization_attempts = 0
+        if self._finalization_attempts >= self.config.finalization_max_retries:
+            self.last_error = "session finalization retry limit reached"
+            return
+        now = time.monotonic()
+        if now - self._last_finalization_attempt < self.config.finalization_backoff_seconds:
+            return
+        from src.fyers.operations import finalize_session
+        self._finalizing = True
+        self._finalization_attempts += 1
+        self._last_finalization_attempt = now
+        try:
+            self.finalization = await finalize_session(self.config, day)
+            if self.finalization.get("status") != "complete":
+                self.last_error = "session finalization incomplete"
+            else:
+                self._finalization_attempts = 0
+        except Exception as exc:
+            self.last_error = f"session finalization failed: {type(exc).__name__}"
+        finally:
+            self._finalizing = False
+            self._persist()
+
     async def run_once(self) -> None:
         """Apply one scheduling decision; split out for deterministic tests."""
         crashed = self._observe_exit()
@@ -132,6 +226,13 @@ class RecorderSupervisor:
         if not self.config.auto_record or not session.eligible:
             if self.process is not None:
                 await self.stop()
+            await self._finalize_pending()
+            return
+        status = self.status()
+        authentication = status.get("authentication")
+        if isinstance(authentication, dict) and authentication.get("state") == "AUTH_REQUIRED":
+            self.last_error = "FYERS authentication required"
+            self._persist()
             return
         if self.manual_stop_date is not None or self.process is not None:
             return

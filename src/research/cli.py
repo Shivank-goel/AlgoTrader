@@ -80,7 +80,8 @@ def status(ctx, campaign: str | None):
     """List unfinished, unpublished and inconsistent experiment evidence."""
     registry = ExperimentRegistry(ctx.obj["research_database"])
     try:
-        click.echo(json.dumps({"schema_version": 2, "experiments": registry.status(campaign)}, indent=2))
+        click.echo(json.dumps({"schema_version": 3, "experiments": registry.status(campaign),
+                               "holdout_access": registry.holdout_access(campaign)}, indent=2))
     finally:
         registry.close()
 
@@ -119,7 +120,7 @@ def recover_publication(ctx, experiment_id: str, trials: Path):
 
 @research.command("run")
 @click.argument("experiment_id")
-@click.option("--adapter", type=click.Choice(["csv_xs_momentum", "csv_nse_regime"]), required=True)
+@click.option("--adapter", type=click.Choice(["csv_xs_momentum", "csv_nse_regime", "bhavcopy_nse_regime"]), required=True)
 @click.option("--root", type=click.Path(exists=True, path_type=Path), default=".")
 @click.option("--trials", type=click.Path(path_type=Path), default="data/trials.json")
 @click.pass_context
@@ -132,6 +133,28 @@ def run_experiment(ctx, experiment_id: str, adapter: str, root: Path, trials: Pa
         result = run_once(registry, experiment_id, root, trials,
                           lambda spec: run_adapter(adapter, spec, root))
         click.echo(json.dumps(result, indent=2))
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
+    finally:
+        registry.close()
+
+
+@research.command("evaluate-holdout")
+@click.argument("experiment_id")
+@click.option("--adapter", type=click.Choice(["csv_xs_momentum", "csv_nse_regime", "bhavcopy_nse_regime"]), required=True)
+@click.option("--root", type=click.Path(exists=True, path_type=Path), default=".")
+@click.option("--trials", type=click.Path(path_type=Path), default="data/trials.json")
+@click.pass_context
+def evaluate_holdout(ctx, experiment_id: str, adapter: str, root: Path, trials: Path):
+    """Consume one pre-registered sealed holdout and record the irreversible access."""
+    from src.research.adapters import run_adapter
+    from src.research.runner import run_once
+    registry = ExperimentRegistry(ctx.obj["research_database"])
+    try:
+        access = registry.authorize_holdout(experiment_id)
+        result = run_once(registry, experiment_id, root, trials,
+                          lambda spec: run_adapter(adapter, spec, root), holdout=True)
+        click.echo(json.dumps({"holdout_access": access, "report": result}, indent=2))
     except ValueError as exc:
         raise click.ClickException(str(exc)) from None
     finally:

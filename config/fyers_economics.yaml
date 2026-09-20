@@ -1,0 +1,10 @@
+# Research scenario only; verify current law and personal applicability before use.
+schema_version: 1
+effective_from: 2024-07-23
+short_term_days: 365
+stcg_rate: 0.20
+ltcg_rate: 0.125
+ltcg_annual_exemption_inr: 125000
+cess_rate: 0.04
+surcharge_rate: 0.0
+source: https://www.incometax.gov.in/iec/foportal/sites/default/files/2026-04/Notification%20No.49_2026.pdf

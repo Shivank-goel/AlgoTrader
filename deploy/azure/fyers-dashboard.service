@@ -7,9 +7,10 @@ Wants=network-online.target
 Type=simple
 User=shivank
 Group=shivank
-WorkingDirectory=/home/shivank/Crypto-trader
-EnvironmentFile=/home/shivank/Crypto-trader/.env
-ExecStart=/home/shivank/Crypto-trader/.venv312/bin/python main.py dashboard --host 127.0.0.1 --port 8000
+WorkingDirectory=/home/shivank/AlgoTrader
+EnvironmentFile=/etc/algotrader/fyers.env
+Environment=FYERS_ENV_FILE=/etc/algotrader/fyers.env
+ExecStart=/home/shivank/AlgoTrader/.venv312/bin/python main.py dashboard --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=20

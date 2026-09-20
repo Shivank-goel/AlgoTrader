@@ -10,8 +10,8 @@ import asyncio
 import hashlib
 import json
 import math
-from decimal import Decimal
 import time
+from decimal import Decimal
 
 import aiohttp
 
@@ -152,7 +152,7 @@ class FyersOrderGateway:
                     if not isinstance(body, dict):
                         raise AmbiguousOrder("Invalid order response")
                     return body
-            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+            except (TimeoutError, aiohttp.ClientError, ValueError):
                 raise AmbiguousOrder("Order transport failed; reconcile before continuing") from None
 
     def _active(self, intent_id: str):
@@ -222,7 +222,7 @@ class FyersOrderGateway:
                 quantity, price = trade.get("tradedQty"), trade.get("tradePrice")
                 if (not isinstance(trade_id, str) or not trade_id or not isinstance(order_id, str)
                         or not order_id or type(quantity) is not int or quantity <= 0
-                        or isinstance(price, bool) or not isinstance(price, (int, float))
+                        or isinstance(price, bool) or not isinstance(price, int | float)
                         or not math.isfinite(price) or price <= 0):
                     raise AmbiguousOrder("Invalid broker trade record")
                 db.execute("INSERT OR IGNORE INTO broker_trades VALUES(?,?,?,?,?)",
@@ -276,7 +276,7 @@ class FyersOrderGateway:
             broker[symbol] = broker.get(symbol, 0) + quantity
         available = next((row.get("equityAmount") for row in limits
                           if isinstance(row, dict) and row.get("id") in {3, 10}), None)
-        if isinstance(available, bool) or not isinstance(available, (int, float)) or not math.isfinite(available):
+        if isinstance(available, bool) or not isinstance(available, int | float) or not math.isfinite(available):
             raise FyersGatewayError("Available broker cash is missing")
         comparison = PositionViews(intended=intended, local=local, broker=broker).reconcile()
         snapshot = {**comparison, "available_cash": float(available), "at": time.time()}

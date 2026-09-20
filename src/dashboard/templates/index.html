@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FYERS NSE Operations</title><link rel="stylesheet" href="/static/css/dashboard.css?v=8"></head>
+<title>FYERS NSE Operations</title><link rel="stylesheet" href="/static/css/dashboard.css?v=9"></head>
 <body>
 <header class="control-bar"><div class="control-left"><h1 class="logo">FYERS · NSE Operations</h1><div class="pulse-wrap"><span id="pulse-dot" class="pulse-dot"></span><span id="state-badge" class="state-badge">LOADING</span></div></div><div class="control-center"><span class="strategy-tag">PAPER / SHADOW · LIVE DISABLED</span></div><div class="control-right"><button class="btn btn-secondary" id="backup">Backup</button><button class="btn btn-secondary" id="recorder">Start recorder</button><button class="btn btn-stop" id="halt">Halt entries</button></div></header>
 <section class="heartbeat-strip"><div class="hb-item"><span class="hb-label">Market</span><span id="market" class="hb-value">—</span></div><div class="hb-item"><span class="hb-label">Last event</span><span id="last-event" class="hb-value">—</span></div><div class="hb-item"><span class="hb-label">Qualification</span><span id="qualification" class="hb-value">—</span></div><div class="hb-item"><span class="hb-label">Backup</span><span id="backup-age" class="hb-value">—</span></div></section>
@@ -9,8 +9,9 @@
 <div class="metrics-grid five-col"><div class="card metric-card"><h3>Paper Equity</h3><div id="equity" class="metric">—</div></div><div class="card metric-card"><h3>Cash</h3><div id="cash" class="metric">—</div></div><div class="card metric-card"><h3>Daily P&amp;L</h3><div id="daily-pnl" class="metric">—</div></div><div class="card metric-card"><h3>Fees</h3><div id="fees" class="metric">—</div></div><div class="card metric-card"><h3>Positions</h3><div id="position-count" class="metric">0</div></div></div>
 <div class="card"><div class="card-header"><h3>Executable Quotes</h3><span class="muted">Bid/ask, spread, age and latency</span></div><div id="quotes" class="table-container"></div></div>
 <div class="grid two-col"><div class="card"><div class="card-header"><h3>Regime-Aware Selector</h3><span class="muted">Observation only · unqualified families abstain</span></div><div id="selector" class="table-container"></div></div><div class="card"><div class="card-header"><h3>Forward Strategy Lab</h3><span class="muted">Net of FYERS fees · no live orders</span></div><div id="strategies" class="table-container"></div></div></div>
+<div class="grid two-col"><div class="card"><h3>Runtime &amp; Data Health</h3><div id="operations" class="table-container"></div></div><div class="card"><h3>Research &amp; Holdout</h3><div id="research" class="table-container"></div></div></div>
 <div class="grid two-col"><div class="card"><h3>Positions &amp; Reconciliation</h3><div id="positions" class="table-container"></div></div><div class="card"><h3>Readiness &amp; Evidence</h3><div id="readiness" class="table-container"></div></div></div>
 <div class="grid two-col"><div class="card"><h3>Orders &amp; Scheduled Intents</h3><div id="orders" class="table-container"></div></div><div class="card"><h3>T+1 Settlement</h3><div id="settlements" class="table-container"></div></div></div>
 <div class="card"><h3>Recent Fills</h3><div id="fills" class="table-container"></div></div>
 <div class="card"><h3>Alerts, Rejections &amp; Operations</h3><div id="events" class="table-container"></div></div>
-</main><script src="/static/js/dashboard.js?v=8"></script></body></html>
+</main><script src="/static/js/dashboard.js?v=9"></script></body></html>

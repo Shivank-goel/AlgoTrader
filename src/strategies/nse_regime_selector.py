@@ -69,21 +69,31 @@ class RegimeAwareSelector:
             raise ValueError("daily closes must be positive")
         return clean
 
-    def regime(self, closes: pd.DataFrame) -> tuple[NseRegime, float, dict]:
+    def regime(
+        self, closes: pd.DataFrame, benchmark_close: pd.Series | None = None,
+    ) -> tuple[NseRegime, float, dict]:
         closes = self._valid(closes)
         if len(closes) < 253 or closes.iloc[-1].notna().sum() < 10:
             return NseRegime.UNKNOWN, 0.0, {"reason": "insufficient_history"}
         returns = closes.pct_change(fill_method=None)
-        benchmark = returns.median(axis=1, skipna=True).fillna(0).add(1).cumprod()
+        if benchmark_close is None:
+            benchmark = returns.median(axis=1, skipna=True).fillna(0).add(1).cumprod()
+            benchmark_source = "subset_median_fallback"
+        else:
+            benchmark = benchmark_close.reindex(closes.index).astype(float).dropna()
+            if len(benchmark) < 253 or benchmark.index[-1] != closes.index[-1] or (benchmark <= 0).any():
+                return NseRegime.UNKNOWN, 0.0, {"reason": "benchmark_history_unavailable"}
+            benchmark_source = str(benchmark_close.name or "broad_market_index")
         level, ma200 = benchmark.iloc[-1], benchmark.iloc[-200:].mean()
         ret60 = level / benchmark.iloc[-61] - 1
-        vol20 = returns.median(axis=1, skipna=True).iloc[-20:].std() * math.sqrt(252)
-        history_vol = returns.median(axis=1, skipna=True).rolling(20).std().dropna() * math.sqrt(252)
+        benchmark_returns = benchmark.pct_change(fill_method=None)
+        vol20 = benchmark_returns.iloc[-20:].std() * math.sqrt(252)
+        history_vol = benchmark_returns.rolling(20).std().dropna() * math.sqrt(252)
         vol_threshold = history_vol.iloc[-252:].quantile(.80)
         breadth = (closes.iloc[-1] > closes.iloc[-100:].mean()).mean()
         details = {"return_60d": float(ret60), "volatility_20d": float(vol20),
                    "volatility_80pct": float(vol_threshold), "breadth_above_100d": float(breadth),
-                   "above_200d": bool(level > ma200)}
+                   "above_200d": bool(level > ma200), "benchmark_source": benchmark_source}
         if vol20 > vol_threshold:
             regime = NseRegime.VOLATILE
             confidence = min(1.0, .5 + (vol20 / max(vol_threshold, 1e-9) - 1))
@@ -114,8 +124,8 @@ class RegimeAwareSelector:
             score = -(five_day - five_day.median())
         return score.replace([np.inf, -np.inf], np.nan).dropna().sort_values(ascending=False)
 
-    def select(self, closes: pd.DataFrame) -> dict:
-        regime, confidence, details = self.regime(closes)
+    def select(self, closes: pd.DataFrame, benchmark_close: pd.Series | None = None) -> dict:
+        regime, confidence, details = self.regime(closes, benchmark_close)
         eligible = list(self.ELIGIBLE[regime]) if confidence >= self.config.min_regime_confidence else []
         evidence = {row.family: row for row in self.config.evidence}
         ranked = sorted((evidence[family] for family in eligible

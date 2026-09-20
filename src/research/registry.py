@@ -6,13 +6,13 @@ the database with SQLite backup, retaining independent artifact hashes.
 
 from __future__ import annotations
 
-import hashlib
 import fcntl
+import hashlib
 import json
-from contextlib import contextmanager
-from pathlib import Path
 import sqlite3
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from pathlib import Path
 
 from src.research.models import ExperimentResult, ExperimentSpec
 
@@ -44,8 +44,9 @@ class ExperimentRegistry:
         self.path = path.resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, timeout=30)
+        self.db.row_factory = sqlite3.Row
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version > 2:
+        if version > 3:
             self.db.close()
             raise ValueError("Unsupported research database version")
         self.db.execute("PRAGMA foreign_keys=ON")
@@ -63,15 +64,19 @@ class ExperimentRegistry:
                 UNIQUE(experiment,kind));
             CREATE TABLE IF NOT EXISTS legacy (
                 digest TEXT PRIMARY KEY, payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS holdout_access (
+                campaign TEXT PRIMARY KEY REFERENCES campaigns(id),
+                experiment TEXT UNIQUE NOT NULL REFERENCES experiments(id),
+                spec_sha256 TEXT NOT NULL, accessed TEXT NOT NULL);
         """)
-        for table in ("campaigns", "experiments", "events", "legacy"):
+        for table in ("campaigns", "experiments", "events", "legacy", "holdout_access"):
             for operation in ("UPDATE", "DELETE"):
                 self.db.execute(f"""CREATE TRIGGER IF NOT EXISTS {table}_{operation.lower()}
                     BEFORE {operation} ON {table} BEGIN
                     SELECT RAISE(ABORT, 'Research records are immutable'); END""")
         self.db.commit()
         # Additive migration: no historical spec, event or imported snapshot changes.
-        self.db.execute("PRAGMA user_version=2")
+        self.db.execute("PRAGMA user_version=3")
 
     @contextmanager
     def execution_lock(self, experiment_id: str):
@@ -93,6 +98,8 @@ class ExperimentRegistry:
 
     def register(self, campaign_id: str, spec: ExperimentSpec) -> None:
         spec = ExperimentSpec.model_validate(spec.model_dump(mode="json"))
+        if spec.schema_version < 2:
+            raise ValueError("New experiments must use schema version 2 with rejection rules")
         payload = canonical(spec.model_dump(mode="json"))
         self.db.execute("BEGIN IMMEDIATE")
         try:
@@ -100,6 +107,8 @@ class ExperimentRegistry:
             count = self.db.execute("SELECT COUNT(*) FROM experiments WHERE campaign=?", (campaign_id,)).fetchone()[0]
             if not campaign or count >= campaign[0]:
                 raise ValueError("Missing campaign or experiment budget exhausted")
+            if self.db.execute("SELECT 1 FROM holdout_access WHERE campaign=?", (campaign_id,)).fetchone():
+                raise ValueError("Campaign holdout was consumed; later tuning cannot claim untouched evidence")
             if spec.parent_experiment_id and not self.db.execute("SELECT 1 FROM experiments WHERE id=?", (spec.parent_experiment_id,)).fetchone():
                 raise ValueError("Unknown parent experiment")
             self.db.execute("INSERT INTO experiments VALUES(?,?,?,?)", (spec.experiment_id, campaign_id, payload, self.now()))
@@ -108,9 +117,49 @@ class ExperimentRegistry:
             self.db.rollback()
             raise
 
+    def authorize_holdout(self, experiment_id: str) -> dict:
+        """Record the campaign's one-way holdout boundary before evaluation."""
+        spec = self.spec(experiment_id)
+        if spec.evaluation_stage != "holdout" or not spec.parent_experiment_id:
+            raise ValueError("Only a registered holdout experiment can consume holdout data")
+        parent = next((row for row in self.status() if row["experiment_id"] == spec.parent_experiment_id), None)
+        if parent is None or parent["state"] != "published":
+            raise ValueError("Holdout evaluation requires a published development parent")
+        campaign = self.db.execute("SELECT campaign FROM experiments WHERE id=?", (experiment_id,)).fetchone()[0]
+        payload = {"campaign": campaign, "experiment": experiment_id,
+                   "spec_sha256": evidence_hash(spec.model_dump(mode="json")),
+                   "accessed": self.now()}
+        existing = self.db.execute(
+            "SELECT campaign,experiment,spec_sha256,accessed FROM holdout_access WHERE campaign=?",
+            (campaign,),
+        ).fetchone()
+        if existing:
+            stored = dict(existing)
+            if stored["experiment"] != experiment_id or stored["spec_sha256"] != payload["spec_sha256"]:
+                raise ValueError("Campaign holdout has already been consumed")
+            return stored
+        with self.db:
+            self.db.execute("INSERT INTO holdout_access VALUES(?,?,?,?)", tuple(payload.values()))
+        return payload
+
+    def holdout_access(self, campaign_id: str | None = None) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT campaign,experiment,spec_sha256,accessed FROM holdout_access "
+            "WHERE (? IS NULL OR campaign=?) ORDER BY campaign", (campaign_id, campaign_id),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def campaign_trial_count(self, experiment_id: str) -> int:
+        row = self.db.execute("SELECT campaign FROM experiments WHERE id=?", (experiment_id,)).fetchone()
+        if not row:
+            raise ValueError("Unknown experiment")
+        return self.db.execute(
+            "SELECT COUNT(*) FROM experiments WHERE campaign=?", (row[0],),
+        ).fetchone()[0]
+
     @staticmethod
     def now() -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     def spec(self, experiment_id: str) -> ExperimentSpec:
         row = self.db.execute("SELECT spec FROM experiments WHERE id=?", (experiment_id,)).fetchone()
@@ -189,12 +238,14 @@ class ExperimentRegistry:
         results = []
         for experiment_id, campaign, encoded in rows:
             problems = []
+            stage = "unknown"
             events = self.db.execute("SELECT kind,payload FROM events WHERE experiment=? ORDER BY seq", (experiment_id,)).fetchall()
             kinds = [e[0] for e in events]
             if kinds != ["started", "result", "published"][:len(kinds)] or len(kinds) > 3:
                 problems.append("Invalid event sequence")
             try:
                 spec = ExperimentSpec.model_validate_json(encoded)
+                stage = spec.evaluation_stage
                 payloads = {k: json.loads(p) for k, p in events}
                 if "started" in payloads and payloads["started"] != {}:
                     problems.append("Invalid started payload")
@@ -215,7 +266,8 @@ class ExperimentRegistry:
             state = {0: "registered", 1: "unfinished", 2: "unpublished", 3: "published"}.get(len(kinds), "inconsistent")
             results.append({"experiment_id": experiment_id, "campaign": campaign,
                             "state": "inconsistent" if problems else state, "issues": problems,
-                            "publication_bound": bool(binding) if "published" in kinds else False})
+                            "publication_bound": bool(binding) if "published" in kinds else False,
+                            "evaluation_stage": stage})
         return results
 
     def report_view(self, experiment_id: str, trials_path: Path) -> dict:

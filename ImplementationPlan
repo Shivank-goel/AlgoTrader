@@ -1,6 +1,6 @@
 # FYERS/NSE implementation roadmap
 
-Updated: 2026-09-19. This replaces the original Delta build proposal.
+Updated: 2026-09-20. This replaces the original Delta build proposal.
 Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Current implementation/verification: [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md).
 Operating instructions: [docs/FYERS_OPERATIONS.md](docs/FYERS_OPERATIONS.md).
@@ -29,8 +29,9 @@ strategy evidence, operational readiness and explicit deployment authorization.
   the execution lock.
 - Bind publication to specification, result and exact trial-snapshot hashes.
   Reports are immutable dated snapshots; report views identify stale evidence.
-- Add schema version 2 without rewriting stored evidence. Audit inconsistent
-  legacy records and validate legacy imports from one captured byte snapshot.
+- Add schema version 3 without rewriting stored evidence. It adds one-way sealed
+  holdout access records. Audit inconsistent legacy records and validate legacy
+  imports from one captured byte snapshot.
 - Regression tests cover concurrency, crashes, invalid evidence and preservation.
 
 Research recovery commands and compatibility notes:
@@ -65,6 +66,9 @@ evidence and integration gates remain open; implementation is not qualification.
   same-day manual stop and bounds crash restarts. The broker's market status is the
   final paper-fill gate. Missing/wrong-year calendars fail closed.
 - Integrated: shadow replay accepts and fully revalidates the exported artifact.
+- Implemented: bounded FYERS daily-history artifacts, NIFTY 50 regime history,
+  automatic official bhavcopy refresh and post-close finalization. Decisions use
+  completed bars only; observation dates are reviewed NSE sessions.
 - Completion gate: exported sessions reproduce decisions and quality metrics.
   Unit fixtures pass; a representative market-hours export remains externally pending.
 
@@ -75,6 +79,10 @@ evidence and integration gates remain open; implementation is not qualification.
   and tick rounding. Paper and shadow use it; the tariff is effective-date versioned.
   T+1 obligations are recorded with explicit holiday inputs, and session quality
   measures exchange-to-receive latency.
+- Implemented: FIFO tax lots/holding periods, versioned tax and infrastructure
+  scenarios, break-even-capital reporting and read-only normalized FYERS ledger
+  reconciliation. Qualification requires positive passive-benchmark excess after
+  these scenarios.
 - Remaining: market-measured latency calibration and FYERS historical-backtest
   accounting parity. Reconcile tariff calculations against contract notes;
   preserve historical broker/cost assumptions rather than relabelling old results.
@@ -86,9 +94,9 @@ evidence and integration gates remain open; implementation is not qualification.
   from hash-registered CSV artifacts. It emits aligned net, benchmark and turnover
   series into the immutable experiment lifecycle; chronological split, bootstrap,
   benchmark and cost-stress reporting use existing validation.
-- Implemented: executable lookahead and warm-up invariance analyzers run inside
-  the registered adapter. Remaining: a holdout-access boundary stronger than the
-  frozen specification and post-run split reporting.
+- Implemented: executable lookahead/warm-up analyzers, a point-in-time ISIN-keyed
+  bhavcopy adapter, a frozen benchmark, sealed one-time holdout access and auditable
+  invalidation of later campaign tuning.
 - Register each campaign's hypothesis, parameter budget, benchmark and rejection
   criteria before execution; record every tested configuration.
 - Start with an economics audit of existing candidates at the existing ₹10,000
@@ -104,8 +112,8 @@ evidence and integration gates remain open; implementation is not qualification.
   trial-registry hashes; changes block entries. Shadow reports fill rate, missed
   intents, turnover, execution shortfall and drawdown.
 - Implemented: a qualification- and halt-gated, idempotent target-to-intent scheduler
-  emits auditable paper intents without broker access. Remaining: connect a reviewed
-  NSE strategy producer and define forward acceptance criteria. Synthetic engineering
+  emits auditable paper intents without broker access. The recorder consumes qualified
+  rebalance/exit intents through the same paper-fill path. Synthetic engineering
   replay is not deployment.
 - Integrated: an observation-only continuous candidate lab records immutable,
   non-overlapping momentum/reversal decisions from fresh FYERS quotes and evaluates
@@ -131,8 +139,9 @@ evidence and integration gates remain open; implementation is not qualification.
   account, quote, accounting, position, order, settlement, evidence and alert state,
   with authenticated recorder/backup/halt controls. Remaining: streaming order updates.
 - Implemented: a verified direct-dependency lock, retained daily backups, isolated
-  restore drills and private Azure systemd/SSH-tunnel deployment artifacts.
-  Remaining: external alert delivery and a checked manual release. Logs continue to
+  restore drills, strict preflight, auth-required state, bounded finalization and an
+  idempotent Azure installer/systemd deployment. Remaining: operator deployment of
+  Azure Monitor email/VM backup and a checked manual release. Logs continue to
   use existing secret-safe boundaries.
 - Completion gate: crash, timeout, partial-fill and reconnect drills pass;
   qualified strategy, forward evidence and an accepted loss budget are required

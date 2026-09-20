@@ -4,7 +4,7 @@ import hashlib
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pytest
@@ -20,8 +20,9 @@ from src.research.validation import block_bootstrap, walk_forward_splits
 def research_setup(tmp_path):
     dataset = tmp_path / "prices.csv"
     dataset.write_text("synthetic fixture only")
-    begin = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    begin = datetime(2020, 1, 1, tzinfo=UTC)
     spec = ExperimentSpec(
+        schema_version=2,
         experiment_id="test", hypothesis="synthetic regression", strategy="fixture", strategy_version="1",
         dataset_version="fixture-1", git_sha="a" * 40, timeframe="day", universe=["TEST"],
         start=begin, end=begin + timedelta(days=200), features=[], parameters={}, search_space={},
@@ -29,7 +30,7 @@ def research_setup(tmp_path):
         execution_assumptions={"synthetic": True}, artifacts={"prices.csv": hashlib.sha256(dataset.read_bytes()).hexdigest()},
         environment={"python": "3.12"}, train_end=begin + timedelta(days=40),
         validation_end=begin + timedelta(days=80), holdout_end=begin + timedelta(days=120),
-        max_drawdown=.2, bootstrap_block=5,
+        max_drawdown=.2, bootstrap_block=5, rejection_rules=["Reject if K-60 fails"],
     )
     registry = ExperimentRegistry(tmp_path / "experiments.db")
     registry.campaign("test", 2)
@@ -112,7 +113,7 @@ def test_walk_forward_and_bootstrap_are_deterministic():
     splits = walk_forward_splits(100, 30, 10, gap=2)
     assert len(splits) == 6
     assert all(train.stop + 2 == test.start for train, test in splits)
-    assert all(a[1].stop <= b[1].start for a, b in zip(splits, splits[1:]))
+    assert all(a[1].stop <= b[1].start for a, b in zip(splits, splits[1:], strict=False))
     values = [0.01, -0.02, .03] * 10
     assert block_bootstrap(values, block=3, seed=4) == block_bootstrap(values, block=3, seed=4)
 
@@ -272,7 +273,7 @@ def test_existing_bad_events_survive_migration_and_are_reported(research_setup):
     registry.db.execute("PRAGMA user_version=0")
     migrated = ExperimentRegistry(root / "experiments.db")
     try:
-        assert migrated.db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert migrated.db.execute("PRAGMA user_version").fetchone()[0] == 3
         assert migrated.db.execute("SELECT * FROM events").fetchall() == before
         assert migrated.status()[0]["state"] == "inconsistent"
         with pytest.raises(ValueError, match="inconsistent"):
@@ -308,6 +309,7 @@ def test_unbound_historical_report_is_preserved(research_setup):
 
 def test_cli_status_resolution_and_report(research_setup):
     from click.testing import CliRunner
+
     from src.research.cli import research
     registry, _, root = research_setup
     registry.event("test", "started", {})

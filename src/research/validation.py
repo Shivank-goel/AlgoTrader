@@ -59,7 +59,8 @@ def block_bootstrap(values: list[float], *, block: int, seed: int, samples: int 
     return tuple(float(v) for v in np.quantile(means, [.025, .975]))
 
 
-def report(spec: ExperimentSpec, output: ExperimentOutput, *, n_trials: int, trial_sharpe_std: float) -> dict:
+def report(spec: ExperimentSpec, output: ExperimentOutput, *, n_trials: int,
+           trial_sharpe_std: float, campaign_trials: int | None = None) -> dict:
     dates = output.timestamps
     if dates[0] < spec.start or dates[-1] > spec.end:
         raise ValueError("Returns are outside the registered date range")
@@ -97,8 +98,27 @@ def report(spec: ExperimentSpec, output: ExperimentOutput, *, n_trials: int, tri
         reasons.append("Block-bootstrap excess-return interval includes zero")
     if periods["holdout"]["mean_excess"] is None or periods["holdout"]["mean_excess"] <= 0:
         reasons.append("No positive holdout benchmark excess")
+    from src.fyers.profitability import TaxPolicy, economic_report
+    economics = economic_report(
+        output.net_returns, output.baseline_returns, output.timestamps,
+        capital_inr=float(spec.cost_model.get("capital_inr", 10000)),
+        monthly_infrastructure_inr=float(spec.cost_model.get("monthly_infrastructure_inr", 0)),
+        policy=TaxPolicy.load(), bootstrap_block=spec.bootstrap_block, seed=spec.seed,
+    )
+    if economics.excess_mean_ci95[0] <= 0:
+        reasons.append("Economic excess-return confidence bound is not positive")
+    if economics.after_tax_and_infrastructure_excess_return <= 0:
+        reasons.append("Strategy does not beat the benchmark after tax and infrastructure scenario")
     return {
         "metrics": metrics, "full_trial_count": n_trials,
+        "multiple_testing": {
+            "campaign_trials": campaign_trials,
+            "full_registry_trials": n_trials,
+            "bonferroni_false_positive_bound": (
+                min(1.0, campaign_trials * .05) if campaign_trials is not None else None
+            ),
+            "deflated_sharpe_probability": metrics["deflated_sharpe"],
+        },
         "k60_numerical_only": k60, "max_drawdown": drawdown, "splits": periods,
         "excess_mean_ci95": [lower, upper], "top_5pct_positive_return_share": top,
         "mean_turnover": float(np.mean(output.turnover)),
@@ -106,6 +126,7 @@ def report(spec: ExperimentSpec, output: ExperimentOutput, *, n_trials: int, tri
             str(bps): float(np.mean(returns - np.asarray(output.turnover) * bps / 10000))
             for bps in (0, 5, 10, 25, 50)
         },
+        "economics": economics.model_dump(mode="json"),
         "critic_reasons": reasons,
         "qualification": False,
         "review_required": ["Holdout genuinely unseen", "Measured costs and spread", "Return units and trial comparability",

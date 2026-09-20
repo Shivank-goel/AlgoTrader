@@ -10,12 +10,16 @@ Run from the repository with `.venv312/bin/python`:
 ```bash
 .venv312/bin/python -m src.execution.fyers_login
 .venv312/bin/python main.py fyers status
+.venv312/bin/python main.py fyers preflight --json --strict
+.venv312/bin/python main.py fyers sync-daily --days 550
+.venv312/bin/python main.py fyers finalize-session --date YYYY-MM-DD
 .venv312/bin/python main.py fyers record --seconds 3600
 .venv312/bin/python main.py fyers export-session --start UNIX --end UNIX --output session.json
 .venv312/bin/python main.py fyers readiness
 .venv312/bin/python main.py fyers backup
 .venv312/bin/python main.py fyers restore-drill --backup BACKUP --output-directory NEW_DIR
 .venv312/bin/python main.py fyers costs --notional 10000
+.venv312/bin/python main.py fyers reconcile-ledger normalized-ledger.csv
 .venv312/bin/python main.py fyers halt "operator stop"
 ```
 
@@ -31,10 +35,14 @@ The dashboard also runs the observation-only strategy lab configured in
 and records at most one immutable regime decision per session. Trending markets
 admit momentum/breakout research; ranging markets admit residual-reversal research;
 volatile, falling, unknown and low-confidence states remain in cash. No family is
-currently qualified. The existing scheduler rechecks hash-bound qualification
-before creating paper intents, and this path never submits broker orders.
+currently qualified. Decisions use immutable completed daily-bar artifacts and
+NIFTY 50 history, never an intraday quote appended to stale daily files. The
+scheduler rechecks hash-bound qualification before creating paper intents; the
+recorder consumes them into the paper ledger only. This path never submits orders.
 
-Research the families through `research run --adapter csv_nse_regime`. Registered
+Research the families through `research run --adapter bhavcopy_nse_regime` for
+historical point-in-time ISIN membership. Use `csv_nse_regime` only for an explicitly
+registered fixed-universe diagnostic. Registered
 CSV artifacts, dates, family, rebalance cadence, spread stress and costs remain
 part of the frozen experiment. Never edit a candidate or universe in place; create
 a new versioned ID.
@@ -50,6 +58,11 @@ and dates in `config/nse_holidays.yaml`. Its state and a same-day manual stop su
 dashboard restarts; a manual stop clears on the next date. Unexpected exits use a
 bounded restart budget and backoff. The FYERS broker market-status response is still
 required before paper fills, so an unexpected exchange closure fails closed.
+
+After the configured delay, the supervisor runs bounded post-close finalization:
+official NSE bhavcopy update, immutable FYERS daily bars, a bounded session/quality
+export and a verified SQLite backup. Failures use capped retries and are visible on
+the dashboard. Observation due dates use reviewed NSE sessions.
 
 Replace and review `config/nse_holidays.yaml` before each calendar year. A missing,
 invalid or wrong-year file disables automatic recording and reports
@@ -71,9 +84,11 @@ backup API, validates integrity and never overwrites an existing destination.
   timestamps are retained. Missing/one-sided/crossed/old books are not fill prices.
 - Read-only account snapshots and broker market-session checks. These monitor
   account access; they are **not** full broker-to-local position reconciliation.
-- SQLite paper account with atomic cash, positions, fees and fills. Stable intent
+- SQLite paper account with atomic cash, positions, fees and fills. FIFO tax lots,
+  holding periods, paper-order state and settlement obligations are durable. Stable intent
   IDs survive restart. Buys use ask, sells bid, plus adverse slippage/tick rounding.
-  Full fills require sufficient top-of-book size; no optimistic partial-fill model.
+  Full fills require sufficient top-of-book size; the shared estimator exposes
+  partial outcomes but the paper path never invents missing liquidity.
 - Paper capital/notional/loss limits, persistent halt, no cash delivery shorts,
   once-per-ISIN/day DP charges. It conservatively charges delivery costs even for
   same-day closes; settlement/T1 and intraday conversion are not modelled.
@@ -124,21 +139,21 @@ Existing strategy specifications and backtest tools must produce/review evidence
 the infrastructure does not invent a strategy or launch parameter sweeps.
 
 Intents are a JSON array with `intent_id`, `strategy`, `symbol`, `side` (`BUY` or
-`SELL`), positive integer `quantity`, and timezone-aware `created_at`. Current
-paper command is an explicit intent test harness, not an autonomous strategy loop.
+`SELL`), positive integer `quantity`, and timezone-aware `created_at`. The paper
+command remains an explicit test harness. Qualified selector rebalances and exits
+are dispatched automatically by the continuous recorder.
 Rejected intents are journalled and not retried; expired intents need a new signal.
 
-## Remaining deployment work
+## Remaining external evidence and cloud work
 
 1. Collect representative market-hours spreads, feed gaps and restart/reconnect
    behavior. The short external test only proved connection and recording.
-2. Validate charges against account records; qualify a strategy on clean data and
+2. Import a normalized FYERS ledger/charge export and validate charges; qualify a strategy on clean data and
    the full registry (206 trials observed, no new trials in this integration).
-3. Accumulate representative strategy-lab observations, expand the universe, and
-   run historical/OOS research. Only a separately qualified strategy may enter the
-   existing paper-intent path; automated exits remain incomplete.
-4. Externally validate account reconciliation fields and complete the order-update
-   stream; perform timeout, partial-fill and reconnect drills; confirm static outbound IP.
+3. Accumulate at least 20 non-overlapping portfolio observations spanning six
+   months and run sealed-holdout research. No current strategy is qualified.
+4. Deploy Azure Monitor email rules and Azure VM/disk backup, then prove alert and
+   isolated restore delivery. Broker order submission remains absent.
 5. Review evidence before introducing a live enable path. Current mode is observation.
 
 Azure deployment units and the SSH-tunnel procedure are documented in

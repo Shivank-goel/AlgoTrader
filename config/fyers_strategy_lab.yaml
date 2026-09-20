@@ -2,6 +2,7 @@
 enabled: true
 universe_file: config/nse_forward_universe.yaml
 candidates: []
+forward_holding_sessions: 5
 regime_selector:
   min_regime_confidence: 0.60
   top_n: 5

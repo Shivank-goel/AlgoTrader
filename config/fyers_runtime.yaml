@@ -31,3 +31,13 @@ recorder_restart_window_seconds: 3600
 recorder_backoff_seconds: 30
 strategy_lab_file: config/fyers_strategy_lab.yaml
 strategy_poll_seconds: 30
+daily_bars_directory: data/fyers/daily-bars
+session_export_directory: data/fyers/sessions
+regime_symbol: NSE:NIFTY50-INDEX
+expected_outbound_ip: 20.198.86.122
+minimum_free_disk_bytes: 1073741824
+# Include the actual Azure VM cost here before evaluating economic profitability.
+monthly_infrastructure_inr: 0
+finalization_delay_minutes: 10
+finalization_max_retries: 3
+finalization_backoff_seconds: 300

@@ -6,18 +6,18 @@ import asyncio
 import fcntl
 import json
 import os
-from pathlib import Path
 import sys
 import time
+from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
-from src.execution.fyers import FyersClient
+from src.execution.fyers import FyersAuthenticationError, FyersClient
 from src.fyers.costs import FyersCosts
 from src.fyers.instruments import resolve_instruments
 from src.fyers.journal import Journal
-from src.fyers.models import Intent, Quote, ROOT, RuntimeConfig, Side
+from src.fyers.models import ROOT, Intent, Quote, RuntimeConfig, Side, environment_path
 from src.fyers.paper import PaperBroker
 from src.fyers.qualification import qualification
 
@@ -38,7 +38,7 @@ def nse_open(body: dict) -> bool:
 
 async def observe(duration: float = 0, intents_path: Path | None = None) -> dict:
     config = RuntimeConfig.load()
-    load_dotenv(ROOT / ".env", override=True)
+    load_dotenv(environment_path(), override=False)
     client = FyersClient.from_env()
     journal = Journal(ROOT / config.database)
     lock = (ROOT / config.database).with_suffix(".lock").open("a")
@@ -58,6 +58,7 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
     try:
         paper = PaperBroker(journal, config, FyersCosts.load())
         intents = []
+        scheduled_ids: set[str] = set()
         if intents_path:
             intents = [Intent.model_validate(row) for row in json.loads(intents_path.read_text())]
             if any(intent.side == Side.BUY for intent in intents):
@@ -74,10 +75,42 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
                 intents = permitted
                 if not intents:
                     raise ValueError("Paper deployment blocked: no qualified entries or risk-reducing exits")
+        elif journal.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduled_intents'"
+        ).fetchone():
+            rows = journal.db.execute(
+                "SELECT payload FROM scheduled_intents s WHERE NOT EXISTS "
+                "(SELECT 1 FROM paper_intent_dispatch d WHERE d.intent_id=s.intent_id) "
+                "ORDER BY created"
+            ).fetchall()
+            intents = [Intent.model_validate_json(row[0]) for row in rows]
+            scheduled_ids = {intent.intent_id for intent in intents}
         held_symbols = [row[0] for row in journal.db.execute("SELECT symbol FROM positions WHERE quantity>0")]
         symbols = sorted(set(config.symbols) | set(held_symbols))
         instruments = await resolve_instruments(config.master_url, symbols)
-        await client.get_profile()
+        try:
+            await client.get_profile()
+        except FyersAuthenticationError as exc:
+            with journal.db:
+                previous_auth = journal.get("authentication", {})
+                journal.put("authentication", {"state": "AUTH_REQUIRED", "at": time.time(),
+                                                "error_type": type(exc).__name__})
+                if (not isinstance(previous_auth, dict)
+                        or previous_auth.get("state") != "AUTH_REQUIRED"):
+                    journal.db.execute(
+                        "INSERT INTO events(received,kind,payload) VALUES(?,?,?)",
+                        (time.time(), "authentication_required", json.dumps({
+                            "reason": "daily FYERS access token rejected",
+                        })),
+                    )
+            raise
+        except Exception as exc:
+            with journal.db:
+                journal.put("authentication", {"state": "UNAVAILABLE", "at": time.time(),
+                                                "error_type": type(exc).__name__})
+            raise
+        with journal.db:
+            journal.put("authentication", {"state": "READY", "at": time.time()})
         journal.event("instruments", {s: i.model_dump(mode="json") for s, i in instruments.items()})
         # Prevent inherited credentials from appearing in process arguments.
         process = await asyncio.create_subprocess_exec(
@@ -127,7 +160,7 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
                     summary["errors"] += 1
                 try:
                     await asyncio.wait_for(account_refresh.wait(), config.reconcile_seconds)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
                 account_refresh.clear()
 
@@ -169,10 +202,22 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
                         try:
                             paper.fill(intent, instruments[intent.symbol], quotes, now=now,
                                        market_open=market["open"] and now - market["checked"] < config.reconcile_seconds * 2)
+                            if intent.intent_id in scheduled_ids:
+                                with journal.db:
+                                    journal.db.execute(
+                                        "INSERT INTO paper_intent_dispatch VALUES(?,?,?,?)",
+                                        (intent.intent_id, "FILLED", None, now),
+                                    )
                         except ValueError as exc:
                             journal.event("paper_rejected", {"intent_id": intent.intent_id, "reason": str(exc)})
+                            if intent.intent_id in scheduled_ids:
+                                with journal.db:
+                                    journal.db.execute(
+                                        "INSERT INTO paper_intent_dispatch VALUES(?,?,?,?)",
+                                        (intent.intent_id, "REJECTED", str(exc)[:200], now),
+                                    )
                         intents.remove(intent)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             paper.mark_to_market(quotes, now=time.time())
             if time.monotonic() - last_health >= 5:
@@ -192,7 +237,7 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
             process.terminate()
             try:
                 await asyncio.wait_for(process.wait(), timeout=5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 process.kill()
                 await process.wait()
         await client.close()
