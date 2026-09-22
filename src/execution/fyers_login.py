@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import secrets
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -18,6 +19,21 @@ from src.fyers.models import environment_path
 
 ROOT = Path(__file__).resolve().parents[2]
 CALLBACK_HANDLER = web.AppKey("callback_handler", object)
+_SAFE_ERROR_FIELDS = ("s", "code", "message")
+
+
+def safe_fyers_error(body: object) -> dict[str, str | int]:
+    """Return only bounded FYERS error metadata; never include credential fields."""
+    if not isinstance(body, dict):
+        return {}
+    result: dict[str, str | int] = {}
+    for field in _SAFE_ERROR_FIELDS:
+        value = body.get(field)
+        if field == "code" and isinstance(value, int) and not isinstance(value, bool):
+            result[field] = value
+        elif isinstance(value, str):
+            result[field] = " ".join(value.split())[:240]
+    return result
 
 
 def callback_address(uri: str) -> tuple[str, int, str]:
@@ -41,7 +57,12 @@ async def exchange_code(base_url: str, app_id: str, secret: str, code: str) -> s
             async with session.post(f"{base_url}/validate-authcode", json=payload,
                                     allow_redirects=False) as response:
                 if response.status != 200:
-                    raise FyersGatewayError(f"Token exchange failed: HTTP {response.status}")
+                    try:
+                        details = safe_fyers_error(await response.json(content_type=None))
+                    except (aiohttp.ClientError, ValueError):
+                        details = {}
+                    suffix = f" FYERS={json.dumps(details, sort_keys=True)}" if details else ""
+                    raise FyersGatewayError(f"Token exchange failed: HTTP {response.status}{suffix}")
                 body = await response.json(content_type=None)
     except (TimeoutError, aiohttp.ClientError, ValueError):
         raise FyersGatewayError("Token exchange failed; restart login") from None
