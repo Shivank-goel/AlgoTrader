@@ -17,6 +17,13 @@ FIELDS = {"symbol", "type", "ltp", "bid_price", "ask_price", "bid_size", "ask_si
           "exch_feed_time", "last_traded_time", "vol_traded_today"}
 
 
+def market_tick(data: object, symbols: list[str]) -> dict | None:
+    """Accept only a configured FYERS symbol and the allowlisted market fields."""
+    if not isinstance(data, dict) or data.get("symbol") not in symbols:
+        return None
+    return {key: value for key, value in data.items() if key in FIELDS}
+
+
 def main() -> None:
     config = RuntimeConfig.load()
     if "FYERS_RECORD_SYMBOLS" in os.environ:
@@ -41,9 +48,10 @@ def main() -> None:
             sys.stdout.flush()
 
     def message(data) -> None:
-        if isinstance(data, dict) and data.get("symbol") in config.symbols:
+        tick = market_tick(data, config.symbols)
+        if tick is not None:
             try:
-                emit("tick", {k: v for k, v in data.items() if k in FIELDS})
+                emit("tick", tick)
             except (ValueError, TypeError):
                 emit("error", {"reason": "invalid market message"})
         elif isinstance(data, dict) and data.get("s") == "error":
