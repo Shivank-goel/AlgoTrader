@@ -114,9 +114,9 @@ def main() -> None:
         asyncio.run(login())
     except KeyboardInterrupt:
         print("Login cancelled.")
-    except (TimeoutError, ValueError, OSError, FyersGatewayError):
+    except (TimeoutError, ValueError, OSError, FyersGatewayError) as e:
         # Exceptions may contain credentials or callback query parameters.
-        print("Login failed. Check .env, port availability and network, then retry.")
+        print("Login failed:", type(e).__name__, str(e))
         raise SystemExit(1) from None
 
 
