@@ -170,8 +170,14 @@ def sync_daily_command(start_date: datetime | None, end_date: datetime | None, d
 
     try:
         artifacts = asyncio.run(run())
-    except Exception:
-        raise click.ClickException("Daily-bar sync failed; check token, calendar and FYERS connectivity") from None
+    except Exception as exc:
+        # Gateway errors deliberately contain only endpoint/status text; never
+        # expose FYERS bodies, headers, credentials, or tokens in terminal output.
+        detail = str(exc)
+        safe_status = next((status for status in ("HTTP 400", "HTTP 401", "HTTP 403", "HTTP 429", "HTTP 500")
+                            if status in detail), None)
+        suffix = safe_status or type(exc).__name__
+        raise click.ClickException(f"Daily-bar sync failed: {suffix}") from None
     readiness = daily_data_readiness(config)
     click.echo(json.dumps({"start": start.isoformat(), "end": end.isoformat(),
                            "sessions": len(artifacts), "data_readiness": readiness,
