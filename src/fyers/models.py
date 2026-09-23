@@ -56,6 +56,9 @@ class RuntimeConfig(BaseModel):
     strategy_lab_file: str = "config/fyers_strategy_lab.yaml"
     strategy_poll_seconds: float = Field(default=30, ge=5, le=300)
     daily_bars_directory: str = "data/fyers/daily-bars"
+    history_request_interval_seconds: float = Field(default=1.1, ge=0.1, le=30)
+    history_rate_limit_retries: int = Field(default=5, ge=0, le=10)
+    history_rate_limit_backoff_seconds: float = Field(default=5, ge=1, le=300)
     session_export_directory: str = "data/fyers/sessions"
     regime_symbol: str = Field(default="NSE:NIFTY50-INDEX", pattern=r"^NSE:.+-INDEX$")
     expected_outbound_ip: str | None = None

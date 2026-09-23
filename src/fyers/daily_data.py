@@ -13,7 +13,7 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.execution.fyers import FyersClient
+from src.execution.fyers import FyersClient, FyersGatewayError
 from src.fyers.models import ROOT, RuntimeConfig
 from src.fyers.sessions import IST
 
@@ -160,9 +160,9 @@ async def sync_daily_history(
     while cursor <= end:
         chunk_end = min(end, cursor + timedelta(days=365))
         for symbol in symbols:
-            body = await client.get_history(symbol, cursor, chunk_end, "D")
+            body = await _history_with_rate_limit(client, symbol, cursor, chunk_end, config)
             by_symbol[symbol].update(_candles(body))
-            await asyncio.sleep(0.12)  # remain below the documented per-second request limit
+            await asyncio.sleep(config.history_request_interval_seconds)
         cursor = chunk_end + timedelta(days=1)
     lab = yaml.safe_load((ROOT / config.strategy_lab_file).read_text())
     universe_path = ROOT / lab["regime_selector"]["universe_file"]
@@ -191,6 +191,20 @@ async def sync_daily_history(
         published = _publish(ROOT / config.daily_bars_directory / f"{day.isoformat()}.json", artifact)
         output.append(published)
     return output
+
+
+async def _history_with_rate_limit(
+    client: FyersClient, symbol: str, start: date, end: date, config: RuntimeConfig,
+) -> dict:
+    """Retry only FYERS HTTP 429 responses with bounded exponential backoff."""
+    for attempt in range(config.history_rate_limit_retries + 1):
+        try:
+            return await client.get_history(symbol, start, end, "D")
+        except FyersGatewayError as exc:
+            if "HTTP 429" not in str(exc) or attempt == config.history_rate_limit_retries:
+                raise
+            await asyncio.sleep(config.history_rate_limit_backoff_seconds * (2 ** attempt))
+    raise AssertionError("unreachable")
 
 
 def completed_bar_panel(

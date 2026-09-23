@@ -32,6 +32,10 @@ recorder_backoff_seconds: 30
 strategy_lab_file: config/fyers_strategy_lab.yaml
 strategy_poll_seconds: 30
 daily_bars_directory: data/fyers/daily-bars
+# FYERS history is rate-limited independently of WebSocket market data.
+history_request_interval_seconds: 1.1
+history_rate_limit_retries: 5
+history_rate_limit_backoff_seconds: 5
 session_export_directory: data/fyers/sessions
 regime_symbol: NSE:NIFTY50-INDEX
 expected_outbound_ip: 20.198.86.122
