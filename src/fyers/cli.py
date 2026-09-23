@@ -105,6 +105,23 @@ def readiness_command() -> None:
     click.echo(json.dumps(readiness(RuntimeConfig.load()), indent=2))
 
 
+@fyers.command("data-readiness")
+@click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON")
+@click.option("--strict", is_flag=True, help="Exit non-zero unless completed daily data is ready")
+@click.pass_context
+def data_readiness_command(ctx, json_output: bool, strict: bool) -> None:
+    """Validate immutable daily FYERS bars before regime research."""
+    from src.fyers.data_readiness import daily_data_readiness
+
+    result = daily_data_readiness(RuntimeConfig.load())
+    if json_output:
+        click.echo(json.dumps(result, indent=2))
+    else:
+        click.echo(f"{result['state']}: {', '.join(result['reasons']) or 'completed data verified'}")
+    if strict and not result["data_ready"]:
+        ctx.exit(1)
+
+
 @fyers.command("preflight")
 @click.option("--json", "json_output", is_flag=True, help="Emit machine-readable JSON")
 @click.option("--strict", is_flag=True, help="Exit non-zero when a blocking check fails")
@@ -133,6 +150,7 @@ def sync_daily_command(start_date: datetime | None, end_date: datetime | None, d
 
     from src.execution.fyers import FyersClient
     from src.fyers.daily_data import sync_daily_history
+    from src.fyers.data_readiness import daily_data_readiness
     from src.fyers.models import environment_path
     from src.fyers.sessions import IST
 
@@ -154,8 +172,10 @@ def sync_daily_command(start_date: datetime | None, end_date: datetime | None, d
         artifacts = asyncio.run(run())
     except Exception:
         raise click.ClickException("Daily-bar sync failed; check token, calendar and FYERS connectivity") from None
+    readiness = daily_data_readiness(config)
     click.echo(json.dumps({"start": start.isoformat(), "end": end.isoformat(),
-                           "sessions": len(artifacts), "live_enabled": False}, indent=2))
+                           "sessions": len(artifacts), "data_readiness": readiness,
+                           "live_enabled": False}, indent=2))
 
 
 @fyers.command("finalize-session")

@@ -1,6 +1,7 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
-from types import SimpleNamespace
 import yaml
 
 from src.fyers.journal import Journal
@@ -110,6 +111,8 @@ def test_regime_decision_is_frozen_once_per_day(tmp_path, monkeypatch):
                                missing_symbols=[])
     monkeypatch.setattr("src.shadow.continuous.completed_bar_panel",
                         lambda *_args, **_kwargs: (synthetic, synthetic, benchmark, [artifact]))
+    monkeypatch.setattr("src.shadow.continuous.daily_data_readiness",
+                        lambda *_args, **_kwargs: {"data_ready": True, "reasons": []})
     monkeypatch.setattr(lab, "_evaluate_regime_families", lambda *_: None)
     monkeypatch.setattr(lab, "_record_family_previews", lambda *_: None)
     journal = Journal(tmp_path / runtime.database)

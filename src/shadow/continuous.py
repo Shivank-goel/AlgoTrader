@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.fyers.costs import FyersCosts
 from src.fyers.daily_data import completed_bar_panel
+from src.fyers.data_readiness import daily_data_readiness
 from src.fyers.journal import Journal
 from src.fyers.models import ROOT, RuntimeConfig, Side
 from src.fyers.sessions import NseSessionCalendar
@@ -268,12 +269,21 @@ class ContinuousStrategyLab:
             return {"state": "disabled", "selected_family": None}
         assert self.universe is not None
         symbols = [row.symbol for row in self.universe.members]
+        data_readiness = daily_data_readiness(
+            self.runtime, directory=ROOT / self.runtime.daily_bars_directory,
+            universe=self.universe, now=now,
+        )
+        if not data_readiness["data_ready"]:
+            return {"state": "waiting_for_data_readiness", "selected_family": None,
+                    "reason": ",".join(data_readiness["reasons"]),
+                    "data_readiness": data_readiness}
         panel, opens, benchmark, artifacts = completed_bar_panel(
             ROOT / self.runtime.daily_bars_directory, symbols,
         )
         if not artifacts:
             return {"state": "waiting_for_completed_bars", "selected_family": None,
-                    "reason": "run fyers sync-daily after the market closes"}
+                    "reason": "run fyers sync-daily after the market closes",
+                    "data_readiness": data_readiness}
         self._evaluate_regime_families(journal, panel, opens, benchmark, artifacts)
         decision = self.selector.select(panel, benchmark)
         data_manifest_sha256 = hashlib.sha256(json.dumps(
@@ -291,6 +301,7 @@ class ContinuousStrategyLab:
                    "warmup_bars": len(panel), "required_warmup_bars": 253,
                    "last_completed_bar": artifacts[-1].session_date.isoformat(),
                    "bar_data_sha256": data_manifest_sha256,
+                   "data_readiness": data_readiness,
                    "missing_symbols": artifacts[-1].missing_symbols,
                    "family_previews": previews, "execution": "observation_only"}
         assert self.config.regime_selector is not None

@@ -13,6 +13,10 @@ Updated: 2026-09-20.
   fail-closed readiness reports. Completed daily-bar artifacts, FIFO tax lots,
   versioned tax/infrastructure scenarios and ledger reconciliation are included.
   The reviewed exchange calendar is local and must be replaced annually.
+- Daily FYERS data now has a reproducible `DATA_READY` gate: immutable artifact
+  hashes, universe/benchmark alignment, per-symbol coverage, corrupt-artifact
+  detection and the 253-bar regime warm-up are exposed in the CLI, dashboard and
+  strategy-lab state before selector evaluation.
 
 ## Integrated workflows
 

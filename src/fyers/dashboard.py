@@ -8,6 +8,7 @@ import sqlite3
 import time
 
 from src.fyers.daily_data import load_completed_bar
+from src.fyers.data_readiness import daily_data_readiness
 from src.fyers.models import ROOT, RuntimeConfig
 from src.fyers.operations import readiness
 
@@ -41,6 +42,13 @@ def dashboard_snapshot(config: RuntimeConfig | None = None, *, now: float | None
     if not path.exists():
         result["errors"].append("journal unavailable")
         return result
+    try:
+        result["sections"]["data_readiness"] = daily_data_readiness(config, now=now)
+    except (OSError, ValueError):
+        result["sections"]["data_readiness"] = {
+            "data_ready": False, "state": "DATA_NOT_READY",
+            "reasons": ["data_quality_failure"],
+        }
     try:
         db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
         db.row_factory = sqlite3.Row
