@@ -137,6 +137,14 @@ def _candles(body: dict) -> dict[date, DailyBar]:
     return rows
 
 
+def _forward_universe_path(config: RuntimeConfig) -> Path:
+    lab = yaml.safe_load((ROOT / config.strategy_lab_file).read_text())
+    value = lab.get("universe_file") if isinstance(lab, dict) else None
+    if not isinstance(value, str) or not value:
+        raise ValueError("FYERS strategy lab requires a top-level universe_file")
+    return ROOT / value
+
+
 async def sync_daily_history(
     client: FyersClient,
     config: RuntimeConfig,
@@ -164,8 +172,7 @@ async def sync_daily_history(
             by_symbol[symbol].update(_candles(body))
             await asyncio.sleep(config.history_request_interval_seconds)
         cursor = chunk_end + timedelta(days=1)
-    lab = yaml.safe_load((ROOT / config.strategy_lab_file).read_text())
-    universe_path = ROOT / lab["regime_selector"]["universe_file"]
+    universe_path = _forward_universe_path(config)
     universe_sha256 = hashlib.sha256(universe_path.read_bytes()).hexdigest()
     output = []
     # Returned exchange sessions, rather than the currently configured calendar

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.execution.fyers import FyersGatewayError
-from src.fyers.daily_data import _history_with_rate_limit
+from src.fyers.daily_data import _forward_universe_path, _history_with_rate_limit
 from src.fyers.models import RuntimeConfig
 
 
@@ -37,3 +37,7 @@ async def test_history_non_rate_limit_error_is_not_retried(monkeypatch):
     with pytest.raises(FyersGatewayError, match="HTTP 400"):
         await _history_with_rate_limit(client, "NSE:SBIN-EQ", date(2026, 9, 1), date(2026, 9, 2), RuntimeConfig.load())
     assert client.get_history.await_count == 1
+
+
+def test_daily_sync_uses_the_top_level_forward_universe_path():
+    assert _forward_universe_path(RuntimeConfig.load()).name == "nse_forward_universe.yaml"
