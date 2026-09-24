@@ -61,7 +61,9 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
     summary = {"ticks": 0, "valid_quotes": 0, "connections": 0, "errors": 0}
     bar_aggregator = IntradayBarAggregator()
     feature_engine = IntradayFeatureEngine()
-    market = {"open": False, "checked": 0.0}
+    # ``open=False`` remains the fail-closed execution gate, while the explicit
+    # state distinguishes a confirmed close from an unavailable API check.
+    market = {"open": False, "state": "UNKNOWN", "reason": "not_checked", "checked": 0.0}
     account_refresh = asyncio.Event()
     try:
         paper = PaperBroker(journal, config, FyersCosts.load())
@@ -146,7 +148,7 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
 
         async def account_checks() -> None:
             while True:
-                market["open"] = False
+                market.update(open=False, state="UNKNOWN", reason="verification_pending")
                 try:
                     # No positions are adopted into paper accounting. Broker and
                     # simulator are deliberately separate ledgers.
@@ -157,15 +159,21 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
                     for body, key in [(positions, "netPositions"), (orders, "orderBook"), (trades, "tradeBook")]:
                         if not isinstance(body.get(key), list):
                             raise ValueError("Invalid account snapshot")
-                    market.update(open=nse_open(status), checked=time.time())
+                    opened = nse_open(status)
+                    market.update(open=opened, state="OPEN" if opened else "CLOSED",
+                                  reason="fyers_market_status", checked=time.time())
                     counts = {"positions": len(positions["netPositions"]),
                               "orders": len(orders["orderBook"]), "trades": len(trades["tradeBook"]),
-                              "market_open": market["open"]}
+                              "market_open": market["open"], "market_state": market["state"]}
                     journal.event("account_check", counts)
                     with journal.db:
                         journal.put("account_check", {**counts, "at": market["checked"]})
                 except Exception as exc:
-                    journal.event("account_error", {"reason": "account/session check failed", "error_type": type(exc).__name__})
+                    market.update(open=False, state="UNKNOWN", reason="market_status_unavailable")
+                    journal.event("account_error", {"reason": "account/session check failed",
+                                                     "operation": "account_and_market_status",
+                                                     "error_type": type(exc).__name__,
+                                                     "market_state": market["state"]})
                     summary["errors"] += 1
                 try:
                     await asyncio.wait_for(account_refresh.wait(), config.reconcile_seconds)
@@ -264,7 +272,9 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
             if time.monotonic() - last_health >= 5:
                 now = time.time()
                 fresh = [s for s, q in quotes.items() if q.usable(now, config.stale_seconds)]
-                journal.event("feed_health", {"fresh_symbols": fresh, "market_open": market["open"]})
+                journal.event("feed_health", {"fresh_symbols": fresh, "market_open": market["open"],
+                                               "market_state": market["state"],
+                                               "market_state_reason": market["reason"]})
                 last_health = time.monotonic()
         journal.event("recorder_stopped", summary)
         if not summary["connections"]:
