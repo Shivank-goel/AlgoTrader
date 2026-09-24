@@ -81,10 +81,56 @@ def dashboard_snapshot(config: RuntimeConfig | None = None, *, now: float | None
                                  "latency_seconds": latency, "spread_bps": spread,
                                  "fresh": now - row["received"] <= config.stale_seconds}
         result["sections"]["quotes"] = [ticks[s] for s in sorted(ticks) if s]
+        benchmark_tick = db.execute(
+            "SELECT received,payload FROM events WHERE kind='tick' ORDER BY id DESC LIMIT 500"
+        ).fetchall()
+        benchmark = None
+        for tick in benchmark_tick:
+            payload = _json(tick["payload"], {})
+            if payload.get("symbol") == config.regime_symbol:
+                benchmark = {"symbol": config.regime_symbol, "price": payload.get("ltp"),
+                             "timestamp": tick["received"], "age_seconds": now - tick["received"],
+                             "fresh": now - tick["received"] <= config.benchmark_max_age_seconds}
+                break
+        result["sections"]["benchmark"] = benchmark or {"symbol": config.regime_symbol, "status": "UNAVAILABLE"}
         result["sections"]["positions"] = [dict(row) for row in db.execute("SELECT * FROM positions WHERE quantity!=0 ORDER BY symbol")]
+        result["sections"]["short_positions"] = ([dict(row) for row in db.execute(
+            "SELECT * FROM short_positions ORDER BY symbol"
+        )] if "short_positions" in tables else [])
+        result["sections"]["position_protection"] = ([dict(row) for row in db.execute(
+            "SELECT * FROM position_protection WHERE status='ACTIVE' ORDER BY symbol"
+        )] if "position_protection" in tables else [])
+        result["sections"]["exit_triggers"] = ([dict(row) for row in db.execute(
+            "SELECT * FROM position_exit_triggers ORDER BY triggered_at DESC LIMIT 50"
+        )] if "position_exit_triggers" in tables else [])
+        result["sections"]["trade_forward_observations"] = ([dict(row) for row in db.execute(
+            "SELECT observation_id,trade_id,evidence_source,strategy_family,strategy_version,symbol,side,"
+            "entry_time,exit_time,exit_reason,net_pnl,net_return,benchmark_return,excess_return,review_status "
+            "FROM trade_forward_observations ORDER BY exit_time DESC LIMIT 100"
+        )] if "trade_forward_observations" in tables else [])
+        result["sections"]["trade_benchmark_evidence"] = ([dict(row) for row in db.execute(
+            "SELECT * FROM trade_benchmark_evidence ORDER BY created_at DESC LIMIT 100"
+        )] if "trade_benchmark_evidence" in tables else [])
+        if "trade_forward_observations" in tables:
+            result["sections"]["trade_forward_summary"] = [dict(row) for row in db.execute(
+                "SELECT strategy_family,strategy_version,evidence_source,COUNT(*) AS total_observations,"
+                "SUM(CASE WHEN review_status='ACCEPTED' THEN 1 ELSE 0 END) AS accepted_observations,"
+                "SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) AS wins, SUM(net_pnl) AS net_pnl,"
+                "MIN(exit_time) AS first_observation,MAX(exit_time) AS latest_observation "
+                "FROM trade_forward_observations GROUP BY strategy_family,strategy_version,evidence_source"
+            )]
+            result["sections"]["performance"] = [dict(row) for row in db.execute(
+                "SELECT side,COUNT(*) AS trades,SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) AS wins,"
+                "SUM(net_pnl) AS net_pnl,AVG(net_return) AS average_return,SUM(fees) AS fees "
+                "FROM trade_forward_observations GROUP BY side"
+            )]
+        result["sections"]["equity_history"] = ([dict(row) for row in db.execute(
+            "SELECT timestamp,current_equity,peak_equity,drawdown,realized_pnl,unrealized_pnl,fees "
+            "FROM equity_checkpoints ORDER BY timestamp LIMIT 500"
+        )] if "equity_checkpoints" in tables else [])
         result["sections"]["fills"] = [dict(row) for row in db.execute("SELECT * FROM fills ORDER BY timestamp DESC LIMIT 50")]
         events = []
-        for row in db.execute("SELECT received,kind,payload FROM events WHERE kind IN ('paper_rejected','intent_scheduled','error','account_error','authentication_required','session_finalization','halt') ORDER BY id DESC LIMIT 50"):
+        for row in db.execute("SELECT received,kind,payload FROM events WHERE kind IN ('paper_rejected','intent_scheduled','shadow_sizing','error','account_error','authentication_required','session_finalization','halt') ORDER BY id DESC LIMIT 50"):
             events.append({"received": row["received"], "kind": row["kind"], "data": _json(row["payload"], {})})
         result["sections"]["events"] = events
         result["sections"]["settlements"] = ([dict(row) for row in db.execute(
@@ -104,12 +150,31 @@ def dashboard_snapshot(config: RuntimeConfig | None = None, *, now: float | None
             "cash": states.get("cash"), "initial_capital": states.get("initial_capital"),
             "realized_pnl": states.get("realized_pnl"), "total_fees": states.get("total_fees"),
         }
+        result["sections"]["latest_sizing"] = next(
+            (item["data"] for item in events if item["kind"] == "shadow_sizing"), None
+        )
+        if "shadow_simulations" in tables:
+            simulation = db.execute("SELECT * FROM shadow_simulations WHERE status='ACTIVE' LIMIT 1").fetchone()
+            latest = db.execute("SELECT * FROM equity_checkpoints ORDER BY timestamp DESC LIMIT 1").fetchone()
+            result["sections"]["simulation"] = dict(simulation) if simulation else None
+            result["sections"]["equity"] = dict(latest) if latest else None
         result["sections"]["strategy_lab"] = states.get("strategy_lab_status") or {
             "enabled": False, "reason": "strategy lab has not started", "candidates": []}
+        result["sections"]["active_candidates"] = ([
+            {**(_json(row["spec"], {}) or {}), "status": row["status"],
+             "registered_at": row["registered_at"], "activated_at": row["activated_at"]}
+            for row in db.execute(
+                "SELECT spec,status,registered_at,activated_at FROM shadow_candidates "
+                "WHERE status='ACTIVE_SHADOW' ORDER BY candidate_id")
+        ] if "shadow_candidates" in tables else [])
         result["sections"]["strategy_observations"] = ([dict(row) for row in db.execute(
             "SELECT candidate_id,decision_at,due_at,kind,selected,evaluated_at,outcome,net_return,"
             "benchmark_return,excess_return FROM strategy_observations "
             "ORDER BY decision_at DESC LIMIT 50")] if "strategy_observations" in tables else [])
+        result["sections"]["stock_decisions"] = ([dict(row) for row in db.execute(
+            "SELECT decision_id,timestamp,symbol,market_regime,stock_state,action,strategy_family,reason,payload "
+            "FROM stock_decisions ORDER BY timestamp DESC,symbol LIMIT 100"
+        )] if "stock_decisions" in tables else [])
         result["sections"]["regime_observations"] = ([dict(row) for row in db.execute(
             "SELECT family,decision_day,entry_day,due_day,evaluated_day,outcome,net_return,"
             "benchmark_return,excess_return FROM regime_forward_observations_v2 "

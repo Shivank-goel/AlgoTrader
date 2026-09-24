@@ -23,12 +23,24 @@ from src.fyers.journal import Journal
 from src.fyers.models import ROOT, RuntimeConfig, Side
 from src.fyers.sessions import NseSessionCalendar
 from src.fyers.universe import ForwardUniverse
+from src.shadow.decisions import DecisionRecord
+from src.strategies.hierarchical import rank_stocks, route_candidate
 from src.strategies.nse_regime_selector import RegimeAwareSelector, SelectorConfig, StrategyFamily
 
 
 class CandidateKind(str, Enum):
     MOMENTUM = "momentum"
     REVERSAL = "reversal"
+
+
+class CandidateLifecycle(str, Enum):
+    RESEARCH = "RESEARCH"
+    CANDIDATE = "CANDIDATE"
+    SHADOW_FORWARD = "SHADOW_FORWARD"
+    QUALIFICATION_REVIEW = "QUALIFICATION_REVIEW"
+    QUALIFIED = "QUALIFIED"
+    QUALIFIED_PAPER = "QUALIFIED_PAPER"
+    RETIRED = "RETIRED"
 
 
 class StrategyCandidate(BaseModel):
@@ -41,6 +53,12 @@ class StrategyCandidate(BaseModel):
     horizon_intervals: int = Field(ge=1, le=1000)
     top_n: int = Field(ge=1, le=25)
     capital_inr: float = Field(gt=0)
+    version: str = Field(default="v1", min_length=1, max_length=40)
+    lifecycle: CandidateLifecycle = CandidateLifecycle.RESEARCH
+    shadow_enabled: bool = False
+    stop_loss_pct: float | None = Field(default=None, gt=0, lt=1)
+    take_profit_pct: float | None = Field(default=None, gt=0, lt=10)
+    protection_required: bool = False
 
     @model_validator(mode="after")
     def valid_universe(self) -> StrategyCandidate:
@@ -121,6 +139,10 @@ class ContinuousStrategyLab:
                     entry_prices TEXT, benchmark_entry REAL, evaluated_day TEXT,
                     outcome TEXT, net_return REAL, benchmark_return REAL, excess_return REAL,
                     PRIMARY KEY(family,decision_day));
+                CREATE TABLE IF NOT EXISTS stock_decisions (
+                    decision_id TEXT PRIMARY KEY, timestamp REAL NOT NULL, symbol TEXT NOT NULL,
+                    market_regime TEXT NOT NULL, stock_state TEXT NOT NULL, action TEXT NOT NULL,
+                    strategy_family TEXT, reason TEXT NOT NULL, payload TEXT NOT NULL);
             """)
 
     def _evaluate_regime_families(self, journal: Journal, closes: pd.DataFrame,
@@ -286,6 +308,11 @@ class ContinuousStrategyLab:
                     "data_readiness": data_readiness}
         self._evaluate_regime_families(journal, panel, opens, benchmark, artifacts)
         decision = self.selector.select(panel, benchmark)
+        stock_ranking = rank_stocks(panel, benchmark)
+        stock_routes = {
+            symbol: route_candidate(decision["regime"], row)
+            for symbol, row in stock_ranking.items()
+        }
         data_manifest_sha256 = hashlib.sha256(json.dumps(
             [(row.session_date.isoformat(), row.content_sha256) for row in artifacts],
             separators=(",", ":"),
@@ -304,6 +331,29 @@ class ContinuousStrategyLab:
                    "data_readiness": data_readiness,
                    "missing_symbols": artifacts[-1].missing_symbols,
                    "family_previews": previews, "execution": "observation_only"}
+        payload["stock_ranking"] = stock_ranking
+        payload["stock_routes"] = stock_routes
+        prices = panel.iloc[-1]
+        for symbol, stock in stock_ranking.items():
+            route = stock_routes[symbol]
+            record = DecisionRecord(
+                decision_id=DecisionRecord.identity(now, symbol, route, stock), timestamp=now,
+                symbol=symbol, market_regime=decision["regime"], stock_state=stock["state"],
+                strategy_family=route["strategy_family"], action=route["action"],
+                reason=route["reason"], long_score=stock.get("long_score"),
+                short_score=stock.get("short_score"),
+                relative_strength_rank=stock.get("relative_strength_rank"),
+                relative_weakness_rank=stock.get("relative_weakness_rank"),
+                risk_multiplier=route["risk_multiplier"],
+                reference_price=float(prices.get(symbol)) if pd.notna(prices.get(symbol)) else None,
+            )
+            with journal.db:
+                journal.db.execute(
+                    "INSERT OR IGNORE INTO stock_decisions VALUES(?,?,?,?,?,?,?,?,?)",
+                    (record.decision_id, record.timestamp, record.symbol, record.market_regime,
+                     record.stock_state, record.action, record.strategy_family, record.reason,
+                     json.dumps(record.payload(), sort_keys=True)),
+                )
         assert self.config.regime_selector is not None
         identity = hashlib.sha256(self.config.regime_selector.model_dump_json().encode()).hexdigest()
         identity = hashlib.sha256(

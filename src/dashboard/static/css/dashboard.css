@@ -170,6 +170,11 @@ body {
     display: none;
 }
 
+.shadow-panel { margin-bottom: 18px; }
+.safety-card { border-color: rgba(0, 212, 170, 0.35); }
+.safety-card h2 { margin-bottom: 8px; color: var(--accent); }
+.safety-card p { color: var(--text-secondary); font-size: .82rem; margin-top: 4px; }
+
 .alert-banner.warn {
     background: rgba(255, 165, 2, 0.12);
     border-color: rgba(255, 165, 2, 0.4);

@@ -86,6 +86,60 @@ def status(ctx, campaign: str | None):
         registry.close()
 
 
+@research.command("nse-preflight")
+@click.option("--root", type=click.Path(exists=True, path_type=Path), default=".")
+def nse_preflight(root: Path):
+    """Audit canonical NSE trial prerequisites without registering or running them."""
+    from src.research.nse_trials import audit_preregistration
+    click.echo(json.dumps(audit_preregistration(root.resolve()), indent=2))
+
+
+@research.group("nse-trial")
+def nse_trial() -> None:
+    """Inspect proposed NSE trials; execution is intentionally separate."""
+
+
+@nse_trial.command("status")
+@click.option("--root", type=click.Path(exists=True, path_type=Path), default=".")
+def nse_trial_status(root: Path) -> None:
+    from src.research.nse_trials import audit_preregistration
+    click.echo(json.dumps({"proposals": audit_preregistration(root.resolve()),
+                           "executed": 0, "registered": 0}, indent=2))
+
+
+@nse_trial.command("register")
+@click.argument("specification", type=click.Path(exists=True, path_type=Path))
+@click.option("--dataset-hash", required=True, help="Hash read from the verified DATA_READY manifest.")
+@click.option("--database", type=click.Path(path_type=Path), default="data/research/experiments.sqlite3")
+def nse_trial_register(specification: Path, dataset_hash: str, database: Path) -> None:
+    """Register one proposed primary trial; never execute it."""
+    from src.research.nse_trials import NseTrialRegistry
+    try:
+        spec = json.loads(specification.read_text())
+        result = NseTrialRegistry(database).register(spec, dataset_hash=dataset_hash)
+    except (OSError, ValueError, TypeError) as exc:
+        raise click.ClickException(str(exc)) from None
+    click.echo(json.dumps(result, indent=2))
+
+
+@nse_trial.command("run")
+@click.argument("trial_id")
+@click.option("--database", type=click.Path(path_type=Path), default="data/research/experiments.sqlite3")
+@click.option("--dataset-dir", type=click.Path(path_type=Path), default="data/fyers/daily-bars")
+def nse_trial_run(trial_id: str, database: Path, dataset_dir: Path) -> None:
+    """Execute a registered trial offline; fail closed on missing semantics."""
+    from src.research.nse_trials import NseTrialRegistry, execute_registered_trial
+    try:
+        NseTrialRegistry(database).get(trial_id)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
+    try:
+        click.echo(json.dumps(execute_registered_trial(NseTrialRegistry(database), trial_id,
+                                                       dataset_dir=dataset_dir), indent=2))
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
+
+
 @research.command("resolve-interruption")
 @click.argument("experiment_id")
 @click.option("--trials", type=click.Path(path_type=Path), default="data/trials.json")

@@ -26,10 +26,9 @@ def market_tick(data: object, symbols: list[str]) -> dict | None:
 
 def main() -> None:
     config = RuntimeConfig.load()
+    stream_symbols = config.symbols + ["NSE:NIFTY50-INDEX"]
     if "FYERS_RECORD_SYMBOLS" in os.environ:
-        config = RuntimeConfig.model_validate({
-            **config.model_dump(), "symbols": json.loads(os.environ["FYERS_RECORD_SYMBOLS"]),
-        })
+        stream_symbols = json.loads(os.environ["FYERS_RECORD_SYMBOLS"])
     load_dotenv(ROOT / ".env", override=True)
     from fyers_apiv3.FyersWebsocket import data_ws
 
@@ -48,7 +47,7 @@ def main() -> None:
             sys.stdout.flush()
 
     def message(data) -> None:
-        tick = market_tick(data, config.symbols)
+        tick = market_tick(data, stream_symbols)
         if tick is not None:
             try:
                 emit("tick", tick)
@@ -59,7 +58,7 @@ def main() -> None:
 
     def connected() -> None:
         emit("connected", {})
-        socket.subscribe(symbols=config.symbols, data_type="SymbolUpdate")
+        socket.subscribe(symbols=stream_symbols, data_type="SymbolUpdate")
 
     socket = data_ws.FyersDataSocket(
         access_token=f"{os.environ['FYERS_APP_ID']}:{os.environ['FYERS_ACCESS_TOKEN']}",

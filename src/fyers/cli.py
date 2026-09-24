@@ -140,6 +140,50 @@ def preflight_command(ctx, json_output: bool, strict: bool, offline: bool) -> No
         ctx.exit(1)
 
 
+@fyers.group("candidates")
+def candidates_group() -> None:
+    """Freeze and inspect explicitly reviewed shadow candidates."""
+
+
+@candidates_group.command("audit")
+@click.argument("spec", type=click.Path(exists=True, path_type=Path))
+@click.option("--trials", type=click.Path(exists=True, path_type=Path), default="data/trials.json")
+def candidate_audit(spec: Path, trials: Path) -> None:
+    from src.shadow.candidates import audit_candidate
+    click.echo(json.dumps(audit_candidate(json.loads(spec.read_text()), trials_path=trials), indent=2))
+
+
+@candidates_group.command("register")
+@click.argument("spec", type=click.Path(exists=True, path_type=Path))
+@click.option("--activate-shadow", is_flag=True, help="Activate prospective shadow collection only.")
+@click.option("--trials", type=click.Path(exists=True, path_type=Path), default="data/trials.json")
+def candidate_register(spec: Path, activate_shadow: bool, trials: Path) -> None:
+    from src.shadow.candidates import CandidateRegistry
+    config = RuntimeConfig.load()
+    try:
+        result = CandidateRegistry(ROOT / config.database, trials).register(
+            json.loads(spec.read_text()), activate=activate_shadow)
+    except (OSError, ValueError, TypeError) as exc:
+        raise click.ClickException(str(exc)) from None
+    click.echo(json.dumps(result, indent=2))
+
+
+@candidates_group.command("status")
+def candidate_status() -> None:
+    from src.shadow.candidates import CandidateRegistry
+    config = RuntimeConfig.load()
+    click.echo(json.dumps(CandidateRegistry(ROOT / config.database, ROOT / config.trials_file).list(), indent=2))
+
+
+@candidates_group.command("generate")
+@click.option("--trials", type=click.Path(exists=True, path_type=Path), default="data/trials.json")
+@click.option("--output-dir", type=click.Path(path_type=Path), default="config/candidates")
+def candidate_generate(trials: Path, output_dir: Path) -> None:
+    """Generate only evidence-backed frozen specs; never register or activate."""
+    from src.shadow.candidates import generate_candidate_specs
+    click.echo(json.dumps(generate_candidate_specs(trials_path=trials, output_dir=output_dir), indent=2))
+
+
 @fyers.command("sync-daily")
 @click.option("--start", "start_date", type=click.DateTime(formats=["%Y-%m-%d"]))
 @click.option("--end", "end_date", type=click.DateTime(formats=["%Y-%m-%d"]))

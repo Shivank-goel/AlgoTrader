@@ -67,6 +67,10 @@ class RuntimeConfig(BaseModel):
     finalization_delay_minutes: int = Field(default=10, ge=0, le=180)
     finalization_max_retries: int = Field(default=3, ge=1, le=20)
     finalization_backoff_seconds: float = Field(default=300, ge=30, le=3600)
+    sizing_file: str = "config/fyers_sizing.yaml"
+    short_entry_cutoff: str = Field(default="15:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    forced_short_exit_time: str = Field(default="15:25", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    benchmark_max_age_seconds: float = Field(default=30, gt=0, le=300)
 
     @field_validator("symbols")
     @classmethod
@@ -120,3 +124,21 @@ class Intent(BaseModel):
     side: Side
     quantity: int = Field(gt=0, strict=True)
     created_at: datetime
+    execution_mode: str = Field(default="QUALIFIED_PAPER", pattern=r"^(SHADOW|QUALIFIED_PAPER)$")
+    lifecycle_status: str = Field(default="QUALIFIED_PAPER", min_length=1, max_length=40)
+    market_regime: str | None = None
+    decision_id: str | None = None
+    code_hash: str | None = None
+    config_hash: str | None = None
+    data_hash: str | None = None
+    reason: str | None = None
+    stop_loss: float | None = Field(default=None, gt=0)
+    take_profit: float | None = Field(default=None, gt=0)
+    protection_required: bool = False
+    strategy_version: str | None = None
+    stock_state: str | None = None
+    protection_method: str | None = None
+    protection_inputs: dict[str, float | int | str] | None = None
+    sizing: dict[str, float | int | str | None] | None = None
+    position_side: str = Field(default="LONG", pattern=r"^(LONG|SHORT)$")
+    intraday_only: bool = False

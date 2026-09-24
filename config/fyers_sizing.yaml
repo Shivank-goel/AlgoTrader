@@ -1,0 +1,9 @@
+# Explicit shadow sizing policy. These are risk controls, not optimized values.
+risk_per_trade_fraction: 0.01
+max_position_fraction: 0.20
+max_gross_exposure_fraction: 0.80
+max_symbol_exposure_fraction: 0.20
+max_open_positions: 5
+minimum_cash_buffer_inr: 0
+minimum_trade_value_inr: 1
+maximum_trade_value_inr: 2000

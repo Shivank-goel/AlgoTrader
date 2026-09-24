@@ -1,0 +1,15 @@
+{
+  "trial_id": "nse_residual_reversal_v2_primary",
+  "supersedes": "nse_residual_reversal_v1_primary",
+  "status": "PROPOSED",
+  "strategy_family": "residual_reversal",
+  "strategy_version": "v2",
+  "execution_price": {"signal_timing": "COMPLETED_SESSION", "entry_timing": "NEXT_SESSION_OPEN", "entry_price_field": "open", "exit_timing": "NEXT_SESSION_OPEN", "exit_price_field": "open", "slippage_model": "adverse_bps", "missing_execution_policy": "FAIL_CLOSED", "terminal_signal_policy": "UNEXECUTED"},
+  "protection_execution": {"mode": "NONE_HISTORICAL_INTRADAY_PROTECTION", "ambiguous_same_bar_policy": "NOT_APPLICABLE"},
+  "parameters": {"residual_window_sessions": 5, "top_n": 5},
+  "supported_side": "LONG", "eligible_regimes": ["ranging"], "universe_id": "nifty50_liquid_affordable_20260817_v1",
+  "dataset_requirement": {"path": "data/fyers/daily-bars", "state": "DATA_READY", "benchmark": "NSE:NIFTY50-INDEX"},
+  "timeframe": "completed_daily_bars", "initial_capital_inr": 10000, "cost_model": "config/fyers_costs.yaml", "slippage_model": {"slippage_bps": 2, "whole_shares": true},
+  "splits": "chronological_train_validation_sealed_holdout", "robustness": ["walk_forward", "cost_stress", "slippage_stress", "sample_half_consistency", "lookahead", "warmup"],
+  "code_hash": "f0f075279ad9b4e644ac96e33ef86901623377033957211d6b2571c632425495", "config_hash": "48c8e6d3364581eefa419d8acea07a0f5f4f3f70cb2d374ce2fde1894fa8650b", "cost_model_hash": "94495e80c9aba8b8682bb91173beeaa2e3b250a63e1ec99f5ddfbe6572d08bfe", "created_at": "2026-09-23T00:00:00+00:00"
+}
