@@ -101,8 +101,9 @@ def daily_data_readiness(
     if artifacts and artifacts[-1].session_date >= local_now.date() and local_now.strftime("%H:%M") <= config.session_end:
         reasons.append("incomplete_session")
     manifest_rows = [(artifact.session_date.isoformat(), artifact.content_sha256) for artifact in artifacts]
-    dataset_sha256 = _hash({"schema_version": 1, "universe_sha256": expected_universe_hash,
-                            "benchmark": config.regime_symbol, "artifacts": manifest_rows})
+    dataset_sha256 = dataset_identity_hash(
+        expected_universe_hash, config.regime_symbol, manifest_rows,
+    )
     return {
         "data_ready": not reasons,
         "state": "DATA_READY" if not reasons else "DATA_NOT_READY",
@@ -124,3 +125,14 @@ def daily_data_readiness(
                     "artifact_sha256": dataset_sha256, "git_sha": _git_sha(),
                     "synced_at": max((artifact.captured_at.isoformat() for artifact in artifacts), default=None)},
     }
+
+
+def dataset_identity_hash(universe_sha256: str, benchmark: str,
+                          artifacts: list[tuple[str, str]]) -> str:
+    """Return the canonical identity used to bind registered trials.
+
+    Keep this deliberately independent of filesystem paths and capture times:
+    identity is the schema, universe, benchmark and ordered content manifest.
+    """
+    return _hash({"schema_version": 1, "universe_sha256": universe_sha256,
+                  "benchmark": benchmark, "artifacts": artifacts})

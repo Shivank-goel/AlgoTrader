@@ -112,10 +112,23 @@ class NseTrialRegistry:
 
 
 def execute_registered_trial(registry: NseTrialRegistry, trial_id: str, *, dataset_dir: Path) -> dict:
-    """Deterministic, offline execution skeleton using immutable daily artifacts."""
+    """Execute only against the exact verified dataset bound at registration."""
     trial = registry.get(trial_id)
     if trial["state"] != "REGISTERED":
         raise ValueError("ALREADY_EXECUTED or trial is not registered")
+    from src.fyers.data_readiness import daily_data_readiness
+    from src.fyers.models import ROOT, RuntimeConfig
+
+    try:
+        runtime = RuntimeConfig.load(ROOT / "config/fyers_runtime.yaml")
+        readiness = daily_data_readiness(runtime, directory=dataset_dir)
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError("DATASET_NOT_READY") from exc
+    if not readiness["data_ready"]:
+        raise ValueError("DATASET_NOT_READY: " + ",".join(readiness["reasons"]))
+    current_hash = readiness["dataset"]["artifact_sha256"]
+    if trial["spec"].get("dataset_hash") != current_hash:
+        raise ValueError("DATASET_MISMATCH")
     artifacts = sorted(dataset_dir.glob("????-??-??.json"))
     if not artifacts:
         raise ValueError("DATASET_UNAVAILABLE_ON_THIS_HOST")
@@ -126,9 +139,15 @@ def execute_registered_trial(registry: NseTrialRegistry, trial_id: str, *, datas
     family = trial["spec"].get("strategy_family")
     if family not in FAMILIES:
         raise ValueError("UNSUPPORTED_STRATEGY")
-    # The Phase 12.1 proposals intentionally omit an explicit execution-price
-    # contract; refusing here prevents inventing next-open/close semantics.
-    if not trial["spec"].get("execution_price"):
+    execution = trial["spec"].get("execution_price")
+    exit_rule = execution.get("exit_rule") if isinstance(execution, dict) else None
+    if not isinstance(exit_rule, dict) or exit_rule.get("type") != "FIXED_HOLDING_PERIOD" \
+            or exit_rule.get("sessions") != 1:
+        raise ValueError("INSUFFICIENT_EXECUTION_SEMANTICS")
+    if not isinstance(execution, dict) or execution.get("entry_timing") != "NEXT_SESSION_OPEN" \
+            or execution.get("entry_price_field") != "open" \
+            or execution.get("exit_timing") != "NEXT_SESSION_OPEN" \
+            or execution.get("exit_price_field") != "open":
         raise ValueError("INSUFFICIENT_EXECUTION_SEMANTICS")
     result = {"trial_id": trial_id, "state": "COMPLETED", "trades": [],
               "lookahead_status": "PASS", "historical_admission": "FAIL_HISTORICAL_ADMISSION",
