@@ -145,10 +145,16 @@ class NseTrialRegistry:
 
 
 def execute_registered_trial(registry: NseTrialRegistry, trial_id: str, *, dataset_dir: Path) -> dict:
-    """Execute only against the exact verified dataset bound at registration."""
+    """Execute only with an explicitly provenance-bound historical engine.
+
+    Existing registrations predate the executor and therefore cannot safely
+    consume newly implemented accounting or fill semantics.
+    """
     trial = registry.get(trial_id)
     if trial["state"] != "REGISTERED":
         raise ValueError("ALREADY_EXECUTED or trial is not registered")
+    if not trial["spec"].get("historical_executor_hash"):
+        raise ValueError("HISTORICAL_EXECUTOR_PROVENANCE_MISSING")
     from src.fyers.data_readiness import daily_data_readiness
     from src.fyers.models import ROOT, RuntimeConfig
 
@@ -182,8 +188,4 @@ def execute_registered_trial(registry: NseTrialRegistry, trial_id: str, *, datas
             or execution.get("exit_timing") != "NEXT_SESSION_OPEN" \
             or execution.get("exit_price_field") != "open":
         raise ValueError("INSUFFICIENT_EXECUTION_SEMANTICS")
-    result = {"trial_id": trial_id, "state": "COMPLETED", "trades": [],
-              "lookahead_status": "PASS", "historical_admission": "FAIL_HISTORICAL_ADMISSION",
-              "failure_reasons": ["execution_adapter_requires_explicit_price_contract"]}
-    registry.record_result(trial_id, result)
-    return result
+    raise ValueError("HISTORICAL_EXECUTOR_NOT_IMPLEMENTED")

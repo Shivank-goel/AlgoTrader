@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from src.research.nse_trials import NseTrialRegistry
+from src.research.nse_trials import NseTrialRegistry, execute_registered_trial
 
 
 def test_primary_trial_registration_persists_seven_fields_and_is_idempotent(tmp_path):
@@ -43,3 +43,15 @@ def test_registration_rejects_bad_provenance_without_inserting(tmp_path, field):
         registry.register(spec, dataset_hash="a" * 64)
     with sqlite3.connect(database) as db:
         assert db.execute("SELECT COUNT(*) FROM nse_primary_trials").fetchone()[0] == 0
+
+
+def test_unbound_historical_executor_cannot_consume_registered_trial(tmp_path):
+    database = tmp_path / "trials.sqlite3"
+    registry = NseTrialRegistry(database)
+    spec = json.loads(Path("config/research/nse_trials/momentum_6_12_v3.json").read_text())
+    spec["trial_id"] = "unbound-executor"
+    registry.register(spec, dataset_hash="a" * 64)
+    with pytest.raises(ValueError, match="HISTORICAL_EXECUTOR_PROVENANCE_MISSING"):
+        execute_registered_trial(registry, spec["trial_id"], dataset_dir=tmp_path)
+    assert registry.get(spec["trial_id"])["state"] == "REGISTERED"
+    assert registry.get(spec["trial_id"])["result"] is None
