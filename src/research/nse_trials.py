@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ FAMILIES = {
     "donchian_breakout": "prior 55-day high breakout with 200-day trend filter",
     "residual_reversal": "five-day cross-sectional residual reversal (research-only)",
 }
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _digest(path: Path) -> str | None:
@@ -85,10 +87,41 @@ class NseTrialRegistry:
                 if row[0] != digest:
                     raise ValueError("registered trial specification is immutable")
                 return json.loads(row[1])
+            self._validate_provenance(spec)
             db.execute("INSERT INTO nse_primary_trials VALUES(?,?,?,?,?,?,?)",
                        (spec["trial_id"], digest, "REGISTERED", now, None,
                         json.dumps(frozen, sort_keys=True), None))
         return frozen
+
+    @staticmethod
+    def _validate_provenance(spec: dict) -> None:
+        """Validate frozen provenance against the repository's canonical inputs."""
+        required = ("code_hash", "config_hash", "cost_model_hash")
+        if any(not isinstance(spec.get(key), str) or not _HEX64.fullmatch(spec[key]) for key in required):
+            raise ValueError("invalid specification provenance hash")
+        from src.fyers.models import ROOT
+        source = ROOT / "src/strategies/nse_regime_selector.py"
+        universe_path = ROOT / "config/nse_forward_universe.yaml"
+        costs = ROOT / "config/fyers_costs.yaml"
+        expected = {"code_hash": _digest(source), "config_hash": _digest(universe_path),
+                    "cost_model_hash": _digest(costs)}
+        for key, value in expected.items():
+            if spec[key] != value:
+                raise ValueError(f"{key} does not match canonical research input")
+        if spec.get("strategy_family") not in FAMILIES or not isinstance(spec.get("strategy_version"), str):
+            raise ValueError("invalid strategy family/version semantics")
+        try:
+            from src.fyers.universe import ForwardUniverse
+            universe = ForwardUniverse.load(universe_path)
+            if spec.get("universe_id") != universe.universe_id:
+                raise ValueError("universe_id does not match canonical universe")
+        except (OSError, ValueError, TypeError) as exc:
+            raise ValueError("invalid canonical universe") from exc
+        requirement = spec.get("dataset_requirement")
+        if not isinstance(requirement, dict) or requirement.get("path") != "data/fyers/daily-bars" \
+                or requirement.get("state") != "DATA_READY" \
+                or requirement.get("benchmark") != "NSE:NIFTY50-INDEX":
+            raise ValueError("dataset requirement does not match canonical inputs")
 
     def get(self, trial_id: str) -> dict:
         with sqlite3.connect(self.database) as db:
