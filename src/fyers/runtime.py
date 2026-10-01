@@ -184,6 +184,7 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
         tasks = [asyncio.create_task(read_stream()), asyncio.create_task(account_checks())]
         started = time.monotonic()
         last_health = 0.0
+        last_mark = 0.0
         while not duration or time.monotonic() - started < duration:
             if journal.db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduled_intents'"
@@ -260,7 +261,15 @@ async def observe(duration: float = 0, intents_path: Path | None = None) -> dict
                         intents.remove(intent)
             except TimeoutError:
                 pass
-            paper.mark_to_market({**quotes, **benchmark_quotes}, now=time.time())
+            # Valuation is a durable snapshot, not a tick-level operation.  A
+            # bounded cadence prevents one BEGIN IMMEDIATE/commit per quote
+            # from back-pressuring the stream pipe. Fills still mark
+            # immediately inside PaperBroker.fill, and protection remains
+            # evaluated for every valid quote above.
+            valuation_now = time.time()
+            if valuation_now - last_mark >= 1.0:
+                paper.mark_to_market({**quotes, **benchmark_quotes}, now=valuation_now)
+                last_mark = valuation_now
             local_now = datetime.now(ZoneInfo("Asia/Kolkata"))
             forced_hour, forced_minute = map(int, config.forced_short_exit_time.split(":"))
             if market["open"] and (local_now.hour, local_now.minute) >= (forced_hour, forced_minute):
