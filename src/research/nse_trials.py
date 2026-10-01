@@ -26,7 +26,15 @@ def _digest(path: Path) -> str | None:
 
 def audit_preregistration(root: Path) -> list[dict]:
     """Return evidence-only pre-registration results; never run or register trials."""
-    dataset = root / "data/fyers/daily_bars"
+    # Resolve through the same runtime configuration used by dashboard
+    # readiness (hyphenated ``daily-bars`` on the VM), never a cwd-relative
+    # duplicate assumption.
+    try:
+        import yaml
+        runtime = yaml.safe_load((root / "config/fyers_runtime.yaml").read_text()) or {}
+        dataset = root / str(runtime.get("daily_bars_directory", "data/fyers/daily-bars"))
+    except (OSError, TypeError, yaml.YAMLError):
+        dataset = root / "data/fyers/daily-bars"
     universe = root / "config/nse_forward_universe.yaml"
     costs = root / "config/fyers_costs.yaml"
     source = root / "src/strategies/nse_regime_selector.py"
