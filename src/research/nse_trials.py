@@ -85,7 +85,7 @@ class NseTrialRegistry:
                 if row[0] != digest:
                     raise ValueError("registered trial specification is immutable")
                 return json.loads(row[1])
-            db.execute("INSERT INTO nse_primary_trials VALUES(?,?,?,?,?,?)",
+            db.execute("INSERT INTO nse_primary_trials VALUES(?,?,?,?,?,?,?)",
                        (spec["trial_id"], digest, "REGISTERED", now, None,
                         json.dumps(frozen, sort_keys=True), None))
         return frozen
