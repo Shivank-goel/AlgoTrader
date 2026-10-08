@@ -122,6 +122,16 @@ class NseTrialRegistry:
                 or requirement.get("state") != "DATA_READY" \
                 or requirement.get("benchmark") != "NSE:NIFTY50-INDEX":
             raise ValueError("dataset requirement does not match canonical inputs")
+        if spec.get("strategy_version", "v0") >= "v4":
+            allocation = spec.get("allocation_rule")
+            required = {"type": "FIXED_POSITION_BUDGET", "max_positions": 5,
+                        "position_budget_inr": 2000, "whole_shares": True,
+                        "leverage_allowed": False, "tie_break": "SCORE_THEN_SYMBOL_ASC",
+                        "entry_exit_order": "EXITS_BEFORE_ENTRIES",
+                        "same_symbol_reentry": "EXIT_THEN_REENTER",
+                        "unaffordable": "NO_TRADE_NO_REDISTRIBUTION"}
+            if not isinstance(allocation, dict) or any(allocation.get(k) != v for k, v in required.items()):
+                raise ValueError("allocation rule is missing or inconsistent")
 
     def get(self, trial_id: str) -> dict:
         with sqlite3.connect(self.database) as db:
@@ -155,6 +165,9 @@ def execute_registered_trial(registry: NseTrialRegistry, trial_id: str, *, datas
         raise ValueError("ALREADY_EXECUTED or trial is not registered")
     if not trial["spec"].get("historical_executor_hash"):
         raise ValueError("HISTORICAL_EXECUTOR_PROVENANCE_MISSING")
+    from src.research.nse_executor_provenance import historical_executor_hash
+    if trial["spec"]["historical_executor_hash"] != historical_executor_hash():
+        raise ValueError("HISTORICAL_EXECUTOR_MISMATCH")
     from src.fyers.data_readiness import daily_data_readiness
     from src.fyers.models import ROOT, RuntimeConfig
 
@@ -188,4 +201,8 @@ def execute_registered_trial(registry: NseTrialRegistry, trial_id: str, *, datas
             or execution.get("exit_timing") != "NEXT_SESSION_OPEN" \
             or execution.get("exit_price_field") != "open":
         raise ValueError("INSUFFICIENT_EXECUTION_SEMANTICS")
-    raise ValueError("HISTORICAL_EXECUTOR_NOT_IMPLEMENTED")
+    from src.research.nse_engine import simulate
+    result = simulate(trial["spec"], bars, dataset_hash=current_hash, trial_id=trial_id)
+    result["state"] = "COMPLETED"
+    registry.record_result(trial_id, result)
+    return result

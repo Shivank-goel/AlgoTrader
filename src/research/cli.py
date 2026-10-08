@@ -94,6 +94,14 @@ def nse_preflight(root: Path):
     click.echo(json.dumps(audit_preregistration(root.resolve()), indent=2))
 
 
+@research.command("nse-executor-provenance")
+@click.option("--root", type=click.Path(exists=True, path_type=Path), default=".")
+def nse_executor_provenance(root: Path) -> None:
+    """Print the read-only historical executor provenance manifest."""
+    from src.research.nse_executor_provenance import provenance
+    click.echo(json.dumps(provenance(root.resolve()), indent=2))
+
+
 @research.group("nse-trial")
 def nse_trial() -> None:
     """Inspect proposed NSE trials; execution is intentionally separate."""
